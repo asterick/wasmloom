@@ -177,6 +177,12 @@ function writeConst(s, node) {
 function writeBody(w, { tree, slotOf, localsDecl }) {
   w.vec(localsDecl, (s, d) => s.u32(d.count).u8(d.type.code));
   writeSeq(w, tree, slotOf);
+  // Every CFG block ends in an explicit transfer, so control never actually
+  // falls off the end — but when the last item is structured (if/loop/block),
+  // the validator still types the fallthrough. Cap it as unreachable.
+  const last = tree[tree.length - 1];
+  const diverges = last && ["return", "unreachable", "br", "br_table"].includes(last.op);
+  if (!diverges) w.u8(OPS.unreachable);
   w.u8(OPS.end);
 }
 

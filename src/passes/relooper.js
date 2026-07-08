@@ -78,12 +78,16 @@ export function reloop(builder, cfg, code) {
     return [...code.get(x), ...transfer(x, ctx)];
   }
 
-  /** Branch to target: br if it has a frame on the context, else place it inline. */
+  /**
+   * Branch to target: br if it has a frame on the context, else place it
+   * inline. Merge nodes always have a frame; loop headers with a single
+   * forward predecessor are placed inline (doTree adds their loop wrapper).
+   */
   function goOrPlace(target, ctx) {
     const depth = brDepth(target, ctx);
     if (depth !== null) return [{ op: "br", depth }];
-    if (isMerge.get(target) || isLoopHeader.get(target)) {
-      fail("internal: relooper cannot place a merge/loop block inline");
+    if (isMerge.get(target)) {
+      fail("internal: relooper cannot place a merge block inline");
     }
     return doTree(target, ctx);
   }
