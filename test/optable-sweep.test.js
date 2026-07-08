@@ -257,6 +257,9 @@ const REFS = {
 
 // NaN payload bits are not portably observable across the JS boundary, and
 // NaN's sign bit is unspecified for host-supplied NaN — skip those few cases.
+REFS["select.select"] = (cond, a, c) => (cond !== 0 ? a : c);
+REFS["f32.select"] = (cond, a, c) => F(cond !== 0 ? a : c);
+
 const SKIP = {
   "i32.reinterpret_f32": (a) => Number.isNaN(a),
   "i64.reinterpret_f64": (a) => Number.isNaN(a),
@@ -272,11 +275,13 @@ const VECTORS = {
 };
 
 function combos(params) {
-  const vs = params.map((p) => VECTORS[p]);
-  if (params.length === 1) return vs[0].map((v) => [v]);
-  const out = [];
-  for (const a of vs[0]) for (const c of vs[1]) out.push([a, c]);
-  return out;
+  let acc = [[]];
+  for (const p of params) {
+    const next = [];
+    for (const prefix of acc) for (const v of VECTORS[p]) next.push([...prefix, v]);
+    acc = next;
+  }
+  return acc;
 }
 
 function same(actual, expected) {
@@ -303,7 +308,7 @@ test("every public constructor selects and executes its spec instruction", async
   let cases = 0;
   for (const v of items) {
     const specKey = `${v.entry.ns}.${v.entry.name}`;
-    const ref = REFS[specKey];
+    const ref = REFS[`${v.ns}.${v.name}`] ?? REFS[specKey];
     assert.ok(ref, `missing reference implementation for ${specKey} — add one to this sweep`);
     const fn = instance.exports[nameOf(v)];
     const vectors = combos(v.params.map((p) => p.wasmType.name));

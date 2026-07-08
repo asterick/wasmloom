@@ -291,6 +291,26 @@ function buildFloatNamespace(T, st) {
 buildFloatNamespace(f32, "f32");
 buildFloatNamespace(f64, "f64");
 
+// --- select: branchless ternary, typed by namespace ---------------------------
+// NOTE: both arms are ALWAYS evaluated (select is not short-circuiting — that's
+// its point: no branch). Use $.if when an arm has effects that must be guarded.
+
+const SELECT_ENTRY = entryOf("select.select");
+
+function defSelect(T) {
+  const display = `${T.name}.select`;
+  T.select = function (cond, ifTrue, ifFalse) {
+    const c = resolveInt32(cond, `${display} condition`);
+    const a = resolveOperand(ifTrue, T, `${display} first arm`);
+    const b = resolveOperand(ifFalse, T, `${display} second arm`);
+    // wasm stack order: val1, val2, cond
+    return makeNode("op", { results: [T], entry: SELECT_ENTRY, operands: [a, b, c], display });
+  };
+  // params in constructor order (cond first) for the sweep
+  VENEER_OPS.push({ ns: T.name, name: "select", params: [s32, T, T], results: [T], entry: SELECT_ENTRY });
+}
+for (const T of [s32, u32, s64, u64, f32, f64]) defSelect(T);
+
 // --- bulk memory operations (surfaced as methods on the memory/data handles) --
 
 function checkMemHandle(mem, what) {

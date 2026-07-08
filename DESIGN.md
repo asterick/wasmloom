@@ -192,8 +192,12 @@ of blocks — conditional values are written to locals in each arm, or use
   `demote`/`promote`. Mixing signedness is an eager error; `u32.cast(x)` /
   `s32.cast(x)` (and 64-bit twins) retype across signedness at zero cost.
 - Comparisons and `eqz` produce `s32` (wasm's 0/1). Conditions (`$.if`,
-  `$.gotoIf`, `$.while`), `$.switch` indices, and memory addresses accept
-  either 32-bit signedness — those positions are sign-agnostic in wasm.
+  `$.gotoIf`, `$.while`, `select`), `$.switch` indices, and memory addresses
+  accept either 32-bit signedness — those positions are sign-agnostic in wasm.
+- **`T.select(cond, ifTrue, ifFalse)`** — branchless ternary, typed by
+  namespace, condition-first like `cond ? a : b`. Both arms are **always
+  evaluated** (that's the point: no branch); use `$.if` when an arm has
+  effects that must be guarded.
 - **JS boundary caveat**: signedness is a build-time discipline. The engine
   sees only i32/i64, so a `u32` result reads back signed in JS
   (`0xFFFFFFFF` arrives as `-1`).
@@ -271,7 +275,6 @@ may assume a shape for these beyond what's noted here.
   `ref.func` / `ref.null` / `ref.is_null`, typed `select` for references.
 - **SIMD (`v128`)** — in the Wasm 2.0 spec but explicitly descoped; the opcode
   table absorbs it later without design changes.
-- **`select`** — exact shape (per-type vs generic) undecided.
 - **Custom sections** — name section emission (possibly tied to `debug`),
   raw `mod.customSection(name, bytes)` passthrough, `.name()` attribute.
 - Already out of spec scope (no design needed yet): GC types, exception

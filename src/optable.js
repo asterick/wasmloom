@@ -195,6 +195,11 @@ op("i64", "store8", 0x3c, ["i32", "i64"], [], { mem: "store", size: 1 });
 op("i64", "store16", 0x3d, ["i32", "i64"], [], { mem: "store", size: 2 });
 op("i64", "store32", 0x3e, ["i32", "i64"], [], { mem: "store", size: 4 });
 
+// --- parametric ---
+// select is type-polymorphic over the numeric types (one opcode); the veneer
+// layer types it per namespace. Params/results here are placeholders.
+op("select", "select", 0x1b, ["t", "t", "i32"], ["t"]);
+
 // --- bulk memory / data segments (immediate encoding via `imm`) ---
 op("memory", "size", 0x3f, [], ["i32"], { imm: "mem" });
 op("memory", "grow", 0x40, ["i32"], ["i32"], { imm: "mem" });
