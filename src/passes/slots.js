@@ -12,10 +12,12 @@ export function allocateSlots(builder, code, liveOut, cfg) {
   const others = builder.vlocals.filter((v) => v.kind !== "param");
 
   // Interference: at each def, the defined vlocal conflicts with everything
-  // else live at that point (same-type only — different types never share).
+  // else live at that point. Pooling is by wasm storage type — s32 and u32
+  // share the i32 pool (signedness is a builder-level fiction).
+  const st = (v) => v.type.wasmType;
   const adj = new Map(others.map((v) => [v, new Set()]));
   const interfere = (a, b) => {
-    if (a === b || a.type !== b.type) return;
+    if (a === b || st(a) !== st(b)) return;
     if (a.kind !== "param") adj.get(a).add(b);
     if (b.kind !== "param") adj.get(b).add(a);
   };
@@ -48,7 +50,7 @@ export function allocateSlots(builder, code, liveOut, cfg) {
     let c = 0;
     while (taken.has(c)) c++;
     colorOf.set(v, c);
-    if (c + 1 > poolSize.get(v.type)) poolSize.set(v.type, c + 1);
+    if (c + 1 > poolSize.get(st(v))) poolSize.set(st(v), c + 1);
   }
 
   // Map colors to final slot numbers: params first, then per-type pools.
@@ -67,6 +69,6 @@ export function allocateSlots(builder, code, liveOut, cfg) {
 
   const slotOf = new Map();
   for (const v of params) slotOf.set(v, v.index);
-  for (const v of others) slotOf.set(v, poolBase.get(v.type) + colorOf.get(v));
+  for (const v of others) slotOf.set(v, poolBase.get(st(v)) + colorOf.get(v));
   return { slotOf, localsDecl };
 }

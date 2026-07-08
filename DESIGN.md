@@ -19,10 +19,11 @@ toolchain; emits binary `.wasm` bytes directly.
 | Expression reuse | Auto-bound to hidden locals; local slots reused when live ranges end |
 | IR | CFG of basic blocks from day one; relooper reconstructs structure at emit |
 | Variables | One concept: `mod.variable()` / `$.variable()` — owner decides global vs local. The handle *is* a value expression; writes are `handle.set(v)` |
-| Op naming | Mirror `.wat` exactly: `i32.div_s`, `i64.extend_i32_u`, `memory.copy` |
-| Zero-result ops | Auto-anchor as statements at their creation point (`i32.store(...)` is a statement) |
-| i64 immediates | BigInt always; plain numbers only when `Number.isSafeInteger`, else throw |
-| i32/f32 consts | `i32.const` throws on non-integers or out-of-range (unsigned spellings OK); `f32.const` rounds |
+| Integer types | Signedness is first-class: `s32`/`u32`/`s64`/`u64` (lowering to wasm i32/i64); floats `f32`/`f64` |
+| Op naming | Suffix-less names select the `.wat` variant by namespace (`u32.div` emits `i32.div_u`); conversions are operand-driven (`f64.convert(x)` picks by x's type); `t.cast(x)` retypes across signedness at zero cost |
+| Zero-result ops | Auto-anchor as statements at their creation point (`u32.store(...)` is a statement) |
+| 64-bit immediates | BigInt always; plain numbers only when `Number.isSafeInteger`, else throw |
+| Consts | Range-checked per namespace: `s32.const` in [-2^31, 2^31), `u32.const` in [0, 2^32), etc.; `f32.const` rounds |
 | Diagnostics | `new Module({ debug: true })` captures creation stack traces for emit-time errors |
 | Types | Plain JS with JSDoc annotations |
 | Testing | Round-trip: instantiate output with V8 (`node --test`), assert executed results |
@@ -30,35 +31,35 @@ toolchain; emits binary `.wasm` bytes directly.
 ## Public API sketch
 
 ```js
-import { Module, i32, i64, f32, f64 } from "wasmemit";
+import { Module, s32, u32, s64, u64, f32, f64 } from "wasmemit";
 
 const mod = new Module();
 
 // An import is a declaration whose implementation is externally supplied.
-const log = mod.function([i32], []).import("env", "log");
+const log = mod.function([s32], []).import("env", "log");
 
 // Declare now, define later. Module-level attributes chain fluently.
-const odd  = mod.function([i32], [i32]).export("odd");
-const even = mod.function([i32], [i32]).export("even");
+const odd  = mod.function([s32], [s32]).export("odd");
+const even = mod.function([s32], [s32]).export("even");
 
 const mem = mod.memory({ min: 1 }).export("memory");
-const counter = mod.variable(i32, 0).export("counter");
+const counter = mod.variable(s32, 0).export("counter");
 
 // Sugar for the common cases…
 odd.body((n, $) => {
-  $.if(i32.eqz(n), $ => {
-    $.return(i32.const(0));
+  $.if(s32.eqz(n), $ => {
+    $.return(s32.const(0));
   }).else($ => {
-    $.return(even.call(i32.sub(n, i32.const(1))));
+    $.return(even.call(s32.sub(n, s32.const(1))));
   });
 });
 
 // …labels for everything else (see Labels below).
 even.body((n, $) => {
-  $.if(i32.eqz(n), $ => {
-    $.return(i32.const(1));
+  $.if(s32.eqz(n), $ => {
+    $.return(s32.const(1));
   }).else($ => {
-    $.return(odd.call(i32.sub(n, i32.const(1))));
+    $.return(odd.call(s32.sub(n, s32.const(1))));
   });
 });
 
@@ -75,13 +76,13 @@ placed).
 
 ```js
 sum.body((n, $) => {
-  const acc  = $.variable(i32, i32.const(0));
+  const acc  = $.variable(s32, s32.const(0));
   const exit = $.label.ahead();
 
   const top = $.label();               // loop head, placed here
-  $.gotoIf(i32.eqz(n), exit);
-  acc.set(i32.add(acc, n));
-  n.set(i32.sub(n, i32.const(1)));
+  $.gotoIf(s32.eqz(n), exit);
+  acc.set(s32.add(acc, n));
+  n.set(s32.sub(n, s32.const(1)));
   $.goto(top);
 
   exit.here();
@@ -115,9 +116,9 @@ $.if(cond, $ => {
   // else
 });
 
-$.while(i32.gt_s(n, i32.const(0)), $ => {
-  acc.set(i32.add(acc, n));
-  n.set(i32.sub(n, i32.const(1)));
+$.while(s32.gt(n, s32.const(0)), $ => {
+  acc.set(s32.add(acc, n));
+  n.set(s32.sub(n, s32.const(1)));
 });
 ```
 
@@ -135,7 +136,7 @@ of blocks — conditional values are written to locals in each arm, or use
 - Same handle pattern throughout: `mod.memory()`, `mod.variable()`,
   `mod.table()`, `mod.data()`, `mod.elem()`, `mod.start(fn)`.
 - Function types are interned/deduplicated into the type section automatically.
-- Loads/stores take the memory handle explicitly (`i32.load(mem, addr, {offset,
+- Loads/stores take the memory handle explicitly (`s32.load(mem, addr, {offset,
   align})`) so multi-memory bolts on later without an API break.
 
 ### Variables, imports, exports
@@ -152,7 +153,7 @@ of blocks — conditional values are written to locals in each arm, or use
 - A module variable's `init` accepts a plain JS value (auto-wrapped in the
   right `t.const`, same strictness rules) or an expression node validated
   against wasm's constant-expression grammar (`t.const`, `ref.null`,
-  `ref.func`, reads of imported immutable variables) — `i32.add(...)` as an
+  `ref.func`, reads of imported immutable variables) — `s32.add(...)` as an
   init throws at the `mod.variable()` call. Function-scoped `init` is
   unrestricted: it desugars to a `.set()` at the declaration point.
 - **Imports build on the forward-decl syntax**: every entity is declared the
@@ -162,9 +163,9 @@ of blocks — conditional values are written to locals in each arm, or use
   module variables).
 
   ```js
-  const log  = mod.function([i32], []).import("env", "log");   // log.call(x)
-  const heap = mod.memory({ min: 1 }).import("env", "memory"); // i32.load(heap, …)
-  const base = mod.variable(i32).import("env", "base").immutable();
+  const log  = mod.function([s32], []).import("env", "log");   // log.call(x)
+  const heap = mod.memory({ min: 1 }).import("env", "memory"); // s32.load(heap, …)
+  const base = mod.variable(s32).import("env", "base").immutable();
   ```
 
 - The binary format puts imports at the low indices of each index space, but
@@ -178,25 +179,37 @@ of blocks — conditional values are written to locals in each arm, or use
 
 ### Expressions
 
-- **Expression namespaces** (`i32`, `i64`, `f32`, `f64`, `ref`, `memory`…) hold
-  instruction constructors: `i32.add(a, b)`, `f64.const(1.5)`, `fn.call(...)`.
-  Each returns a node with a known result type — checked eagerly, no implicit
-  conversions (mirroring wasm; conversions are explicit instructions).
-- Constructor names **mirror `.wat` exactly**: `i32.div_s`, `i32.shr_u`,
-  `i64.extend_i32_s`, `i32.trunc_sat_f64_u`, `memory.copy` — greppable against
-  the spec with zero translation.
+- **Expression namespaces are the types** (`s32`, `u32`, `s64`, `u64`, `f32`,
+  `f64`) and hold instruction constructors: `s32.add(a, b)`, `f64.const(1.5)`,
+  `fn.call(...)`. Each returns a node with a known result type — checked
+  eagerly, no implicit conversions.
+- **Signedness lives in the type, not the instruction name.** Suffix-less
+  constructors select the `.wat` variant from the namespace: `u32.div` emits
+  `i32.div_u`, `s64.shr` emits `i64.shr_s`; sign-agnostic ops (`add`, `and`,
+  `eq`, …) appear on both namespaces and emit identical code. Conversions are
+  **operand-driven**: `f64.convert(x)` picks `convert_i32_s/u`/`convert_i64_s/u`
+  from x's type; likewise `trunc`/`trunc_sat`/`extend`/`wrap`/`reinterpret`/
+  `demote`/`promote`. Mixing signedness is an eager error; `u32.cast(x)` /
+  `s32.cast(x)` (and 64-bit twins) retype across signedness at zero cost.
+- Comparisons and `eqz` produce `s32` (wasm's 0/1). Conditions (`$.if`,
+  `$.gotoIf`, `$.while`), `$.switch` indices, and memory addresses accept
+  either 32-bit signedness — those positions are sign-agnostic in wasm.
+- **JS boundary caveat**: signedness is a build-time discipline. The engine
+  sees only i32/i64, so a `u32` result reads back signed in JS
+  (`0xFFFFFFFF` arrives as `-1`).
 - A variable handle (or param — params are just pre-declared variables)
   **is itself a value expression** — using it anywhere reads it at that point
   (reads are unlimited and cheap); writes are `handle.set(value)`.
 - **Zero-result instructions are statements**: constructors whose instruction
-  produces no value (`i32.store`, `memory.copy`, a call to a `[] -> []`
+  produces no value (`s32.store`, `memory.copy`, a call to a `[] -> []`
   function) append to the current block at the point they're called —
   consistent with the creation-point rule below. `$` stays small: variables,
   labels, control flow, `$.return`, `$.drop`.
-- Immediates are strict: `i64.const` accepts BigInt always and plain numbers
-  only when `Number.isSafeInteger(n)`; `i32.const` throws on non-integers or
-  values outside `[-2^31, 2^32)` (unsigned spellings like `0xFFFFFFFF` are
-  accepted); `f32.const` rounds doubles to float32 (unavoidable).
+- Immediates are strict and range-checked per namespace: `s32.const` accepts
+  `[-2^31, 2^31)`, `u32.const` accepts `[0, 2^32)` (unsigned spellings like
+  `0xFFFFFFFF` go through `u32`); the 64-bit namespaces accept BigInt always
+  and plain numbers only when `Number.isSafeInteger(n)`; `f32.const` rounds
+  doubles to float32 (unavoidable).
 
 ### Evaluation-order semantics
 
@@ -234,8 +247,9 @@ may assume a shape for these beyond what's noted here.
   `ref.func` / `ref.null` / `ref.is_null`, typed `select` for references.
 - **Memory, fully specified** — data segments (active/passive,
   `memory.init`/`data.drop`), `memory.size/grow/fill/copy`, the sized
-  load/store variants (`i32.load8_s`, …) and alignment defaults. (`mod.memory`
-  limits + basic handle-explicit `i32.load`/`i32.store` remain in scope for
+  load/store variants (`u32.load8`, `s32.load16`, … — extension signedness
+  from the type) and alignment defaults. (`mod.memory`
+  limits + basic handle-explicit `load`/`store` remain in scope for
   the core.)
 - **SIMD (`v128`)** — in the Wasm 2.0 spec but explicitly descoped; the opcode
   table absorbs it later without design changes.

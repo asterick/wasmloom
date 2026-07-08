@@ -1,19 +1,23 @@
 import { fail } from "./errors.js";
 
 /**
- * A WebAssembly value type. Instances double as the instruction namespaces
- * (`i32.add`, `f64.const`, …) — constructors are attached by expr.js.
+ * A value type. Public integer types carry signedness (s32/u32/s64/u64) and
+ * lower to a wasm storage type (i32/i64); floats are their own storage type.
+ * Instances double as instruction namespaces (`s32.add`, `f64.const`, …) —
+ * constructors are attached by expr.js.
  */
 export class ValType {
   /**
-   * @param {string} name .wat name
-   * @param {number} code binary type code
+   * @param {string} name user-facing name
+   * @param {number} code binary type code of the storage type
    * @param {number|bigint} zero zero value for default initialization
+   * @param {ValType} [wasmType] storage type (defaults to self)
    */
-  constructor(name, code, zero) {
+  constructor(name, code, zero, wasmType = null) {
     this.name = name;
     this.code = code;
     this.zero = zero;
+    this.wasmType = wasmType ?? this;
   }
 
   toString() {
@@ -21,18 +25,25 @@ export class ValType {
   }
 }
 
+// Storage types (internal — the wasm view).
 export const i32 = new ValType("i32", 0x7f, 0);
 export const i64 = new ValType("i64", 0x7e, 0n);
+
+// Public types.
 export const f32 = new ValType("f32", 0x7d, 0);
 export const f64 = new ValType("f64", 0x7c, 0);
+export const s32 = new ValType("s32", 0x7f, 0, i32);
+export const u32 = new ValType("u32", 0x7f, 0, i32);
+export const s64 = new ValType("s64", 0x7e, 0n, i64);
+export const u64 = new ValType("u64", 0x7e, 0n, i64);
 
-/** All value types, in canonical local-pool order. */
+/** Storage types in canonical local-pool order. */
 export const valtypes = [i32, i64, f32, f64];
 
 /** @returns {ValType} */
 export function checkValType(x, what) {
-  if (!(x instanceof ValType)) {
-    fail(`${what}: expected a value type (i32, i64, f32, f64), got ${describe(x)}`);
+  if (!(x instanceof ValType) || x === i32 || x === i64) {
+    fail(`${what}: expected a value type (s32, u32, s64, u64, f32, f64), got ${describe(x)}`);
   }
   return x;
 }
@@ -42,9 +53,13 @@ export function checkTypeList(list, what) {
   return list.map((t, i) => checkValType(t, `${what}[${i}]`));
 }
 
-/** Canonical interning key for a function signature. */
+/**
+ * Canonical interning key for a function signature — by storage type, since
+ * signedness is a builder-level discipline invisible to the wasm type section.
+ */
 export function typeKey(params, results) {
-  return `${params.map((t) => t.name).join(",")}->${results.map((t) => t.name).join(",")}`;
+  const st = (t) => t.wasmType.name;
+  return `${params.map(st).join(",")}->${results.map(st).join(",")}`;
 }
 
 function describe(x) {

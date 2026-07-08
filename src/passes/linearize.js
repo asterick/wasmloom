@@ -86,6 +86,10 @@ export function linearize(builder, cfg) {
           for (const o of node.operands) emitTree(o);
           out.push({ k: "op", entry: node.entry, memarg: node.memarg });
           break;
+        case "cast":
+          // zero-cost retype — same bits, no instruction
+          emitTree(node.operands[0]);
+          break;
         case "call":
           for (const o of node.operands) emitTree(o);
           out.push({ k: "call", fn: node.func });

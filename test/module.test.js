@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, i32, i64, f64 } from "../src/index.js";
+import { Module, s32, s64, u64, f64 } from "../src/index.js";
 
 async function instantiate(mod, imports = {}) {
   const bytes = mod.emit();
@@ -11,9 +11,9 @@ async function instantiate(mod, imports = {}) {
 
 test("imported function is callable", async () => {
   const mod = new Module();
-  const log = mod.function([i32], []).import("env", "log");
-  const double = mod.function([i32], [i32]).import("env", "double");
-  mod.function([i32], [i32]).export("run").body((x, $) => {
+  const log = mod.function([s32], []).import("env", "log");
+  const double = mod.function([s32], [s32]).import("env", "double");
+  mod.function([s32], [s32]).export("run").body((x, $) => {
     log.call(x); // zero results → statement
     $.return(double.call(x));
   });
@@ -28,16 +28,16 @@ test("imported function is callable", async () => {
 
 test("re-exporting an import", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).import("env", "id").export("id");
+  mod.function([s32], [s32]).import("env", "id").export("id");
   const { exports } = await instantiate(mod, { env: { id: (v) => v } });
   assert.equal(exports.id(7), 7);
 });
 
 test("module variables: init, mutation, export", async () => {
   const mod = new Module();
-  const counter = mod.variable(i32, 10).export("counter");
-  mod.function([], [i32]).export("bump").body(($) => {
-    counter.set(i32.add(counter, i32.const(1)));
+  const counter = mod.variable(s32, 10).export("counter");
+  mod.function([], [s32]).export("bump").body(($) => {
+    counter.set(s32.add(counter, s32.const(1)));
     $.return(counter);
   });
   const { exports } = await instantiate(mod);
@@ -47,11 +47,11 @@ test("module variables: init, mutation, export", async () => {
   assert.equal(exports.counter.value, 12);
 });
 
-test("module variable zero-init default and i64", async () => {
+test("module variable zero-init default and s64", async () => {
   const mod = new Module();
-  const acc = mod.variable(i64).export("acc");
-  mod.function([i64], []).export("add").body((v, $) => {
-    acc.set(i64.add(acc, v));
+  const acc = mod.variable(s64).export("acc");
+  mod.function([s64], []).export("add").body((v, $) => {
+    acc.set(s64.add(acc, v));
   });
   const { exports } = await instantiate(mod);
   assert.equal(exports.acc.value, 0n);
@@ -61,13 +61,13 @@ test("module variable zero-init default and i64", async () => {
 
 test("imported immutable variable used in another initializer", async () => {
   const mod = new Module();
-  const base = mod.variable(i32).import("env", "base").immutable();
-  const derived = mod.variable(i32, base).export("derived");
-  mod.function([], [i32]).export("get").body(($) => {
-    $.return(i32.add(base, derived));
+  const base = mod.variable(s32).import("env", "base").immutable();
+  const derived = mod.variable(s32, base).export("derived");
+  mod.function([], [s32]).export("get").body(($) => {
+    $.return(s32.add(base, derived));
   });
   const { exports } = await instantiate(mod, {
-    env: { base: new WebAssembly.Global({ value: "i32" }, 100) },
+    env: { base: new WebAssembly.Global({ value: "i32" }, 100) }, // JS API name
   });
   assert.equal(exports.get(), 200);
 });
@@ -75,13 +75,13 @@ test("imported immutable variable used in another initializer", async () => {
 test("memory: store and load round-trip", async () => {
   const mod = new Module();
   const mem = mod.memory({ min: 1 }).export("memory");
-  mod.function([i32, i32], []).export("poke").body((addr, val, $) => {
-    i32.store(mem, addr, val);
+  mod.function([s32, s32], []).export("poke").body((addr, val, $) => {
+    s32.store(mem, addr, val);
   });
-  mod.function([i32], [i32]).export("peek").body((addr, $) => {
-    $.return(i32.load(mem, addr));
+  mod.function([s32], [s32]).export("peek").body((addr, $) => {
+    $.return(s32.load(mem, addr));
   });
-  mod.function([i32], [f64]).export("peekf").body((addr, $) => {
+  mod.function([s32], [f64]).export("peekf").body((addr, $) => {
     $.return(f64.load(mem, addr, { offset: 8 }));
   });
   const { exports } = await instantiate(mod);
@@ -94,8 +94,8 @@ test("memory: store and load round-trip", async () => {
 test("imported memory", async () => {
   const mod = new Module();
   const mem = mod.memory({ min: 1 }).import("env", "memory");
-  mod.function([i32], [i32]).export("peek").body((addr, $) => {
-    $.return(i32.load(mem, addr));
+  mod.function([s32], [s32]).export("peek").body((addr, $) => {
+    $.return(s32.load(mem, addr));
   });
   const memory = new WebAssembly.Memory({ initial: 1 });
   new DataView(memory.buffer).setInt32(0, 1234, true);
@@ -105,9 +105,9 @@ test("imported memory", async () => {
 
 test("start function runs at instantiation", async () => {
   const mod = new Module();
-  const flag = mod.variable(i32).export("flag");
+  const flag = mod.variable(s32).export("flag");
   const init = mod.function([], []).body(($) => {
-    flag.set(i32.const(99));
+    flag.set(s32.const(99));
   });
   mod.start(init);
   const { exports } = await instantiate(mod);
@@ -116,12 +116,12 @@ test("start function runs at instantiation", async () => {
 
 test("multi-value results destructure", async () => {
   const mod = new Module();
-  const divmod = mod.function([i32, i32], [i32, i32]).export("divmod").body((a, b, $) => {
-    $.return(i32.div_s(a, b), i32.rem_s(a, b));
+  const divmod = mod.function([s32, s32], [s32, s32]).export("divmod").body((a, b, $) => {
+    $.return(s32.div(a, b), s32.rem(a, b));
   });
-  mod.function([i32, i32], [i32]).export("recombine").body((a, b, $) => {
+  mod.function([s32, s32], [s32]).export("recombine").body((a, b, $) => {
     const [q, r] = divmod.call(a, b);
-    $.return(i32.add(i32.mul(q, b), r));
+    $.return(s32.add(s32.mul(q, b), r));
   });
   const { exports } = await instantiate(mod);
   assert.deepEqual(exports.divmod(17, 5), [3, 2]);
@@ -130,8 +130,8 @@ test("multi-value results destructure", async () => {
 
 test("export aliases", async () => {
   const mod = new Module();
-  mod.function([], [i32]).export("a").export("b").body(($) => {
-    $.return(i32.const(1));
+  mod.function([], [s32]).export("a").export("b").body(($) => {
+    $.return(s32.const(1));
   });
   const { exports } = await instantiate(mod);
   assert.equal(exports.a(), 1);
@@ -141,10 +141,10 @@ test("export aliases", async () => {
 test("declaration order is unconstrained (imports emitted first)", async () => {
   const mod = new Module();
   // defined before the import is declared
-  const f = mod.function([], [i32]).export("f");
-  const ext = mod.function([], [i32]).import("env", "ext");
+  const f = mod.function([], [s32]).export("f");
+  const ext = mod.function([], [s32]).import("env", "ext");
   f.body(($) => {
-    $.return(i32.add(ext.call(), i32.const(1)));
+    $.return(s32.add(ext.call(), s32.const(1)));
   });
   const { exports } = await instantiate(mod, { env: { ext: () => 10 } });
   assert.equal(exports.f(), 11);
@@ -170,10 +170,10 @@ test("f32.const rounds doubles to float32", async () => {
   assert.notEqual(exports.f(), 0.1);
 });
 
-test("i64 unsigned spellings read back as signed", async () => {
+test("u64 max reads back as signed at the JS boundary", async () => {
   const mod = new Module();
-  mod.function([], [i64]).export("f").body(($) => {
-    $.return(i64.const(2n ** 64n - 1n));
+  mod.function([], [u64]).export("f").body(($) => {
+    $.return(u64.const(2n ** 64n - 1n));
   });
   const { exports } = await instantiate(mod);
   assert.equal(exports.f(), -1n);
@@ -182,11 +182,11 @@ test("i64 unsigned spellings read back as signed", async () => {
 test("load/store offsets are applied", async () => {
   const mod = new Module();
   const mem = mod.memory({ min: 1 }).export("memory");
-  mod.function([i32, i32], []).export("poke").body((addr, val, $) => {
-    i32.store(mem, addr, val, { offset: 65500 });
+  mod.function([s32, s32], []).export("poke").body((addr, val, $) => {
+    s32.store(mem, addr, val, { offset: 65500 });
   });
-  mod.function([i32], [i32]).export("peek").body((addr, $) => {
-    $.return(i32.load(mem, addr, { offset: 65500 }));
+  mod.function([s32], [s32]).export("peek").body((addr, $) => {
+    $.return(s32.load(mem, addr, { offset: 65500 }));
   });
   const { exports } = await instantiate(mod);
   exports.poke(0, 777);

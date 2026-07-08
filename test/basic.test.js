@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, i32, i64, f32, f64 } from "../src/index.js";
+import { Module, s32, u32, s64, f32, f64 } from "../src/index.js";
 
 async function instantiate(mod, imports = {}) {
   const bytes = mod.emit();
@@ -17,8 +17,8 @@ test("empty module emits and instantiates", async () => {
 
 test("add function end-to-end", async () => {
   const mod = new Module();
-  mod.function([i32, i32], [i32]).export("add").body((a, b, $) => {
-    $.return(i32.add(a, b));
+  mod.function([s32, s32], [s32]).export("add").body((a, b, $) => {
+    $.return(s32.add(a, b));
   });
   const { exports } = await instantiate(mod);
   assert.equal(exports.add(2, 3), 5);
@@ -27,8 +27,8 @@ test("add function end-to-end", async () => {
 
 test("all four value types round-trip", async () => {
   const mod = new Module();
-  mod.function([i64, i64], [i64]).export("mul64").body((a, b, $) => {
-    $.return(i64.mul(a, b));
+  mod.function([s64, s64], [s64]).export("mul64").body((a, b, $) => {
+    $.return(s64.mul(a, b));
   });
   mod.function([f32, f32], [f32]).export("addf").body((a, b, $) => {
     $.return(f32.add(a, b));
@@ -44,25 +44,25 @@ test("all four value types round-trip", async () => {
 
 test("constants including edge values", async () => {
   const mod = new Module();
-  mod.function([], [i32]).export("umax").body(($) => {
-    $.return(i32.const(0xffffffff));
+  mod.function([], [u32]).export("umax").body(($) => {
+    $.return(u32.const(0xffffffff));
   });
-  mod.function([], [i64]).export("big").body(($) => {
-    $.return(i64.const(2n ** 63n - 1n));
+  mod.function([], [s64]).export("big").body(($) => {
+    $.return(s64.const(2n ** 63n - 1n));
   });
   mod.function([], [f64]).export("pi").body(($) => {
     $.return(f64.const(Math.PI));
   });
   const { exports } = await instantiate(mod);
-  assert.equal(exports.umax(), -1); // 0xFFFFFFFF as signed i32
+  assert.equal(exports.umax(), -1); // u32 max reads back signed at the JS boundary
   assert.equal(exports.big(), 2n ** 63n - 1n);
   assert.equal(exports.pi(), Math.PI);
 });
 
 test("conversions", async () => {
   const mod = new Module();
-  mod.function([f64], [i32]).export("sat").body((x, $) => {
-    $.return(i32.trunc_sat_f64_s(x));
+  mod.function([f64], [s32]).export("sat").body((x, $) => {
+    $.return(s32.trunc_sat(x));
   });
   const { exports } = await instantiate(mod);
   assert.equal(exports.sat(3.7), 3);
@@ -72,8 +72,8 @@ test("conversions", async () => {
 
 test("parameters are mutable variables", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("inc").body((n, $) => {
-    n.set(i32.add(n, i32.const(1)));
+  mod.function([s32], [s32]).export("inc").body((n, $) => {
+    n.set(s32.add(n, s32.const(1)));
     $.return(n);
   });
   const { exports } = await instantiate(mod);

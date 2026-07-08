@@ -1,6 +1,6 @@
 import { fail } from "./errors.js";
-import { i32 } from "./types.js";
 import { checkValType } from "./types.js";
+import { resolveInt32 } from "./expr.js";
 import { Block, Label, successors } from "./cfg.js";
 import { makeNode, resolveOperand, describeNode } from "./node.js";
 import { Variable } from "./variable.js";
@@ -165,7 +165,7 @@ class IfChain {
   }
 
   _branchInto(cond, what) {
-    const c = resolveOperand(cond, i32, `${what} condition`);
+    const c = resolveInt32(cond, `${what} condition`);
     const thenBlock = this.b.newBlock();
     const elseBlock = this.b.newBlock();
     c.consumers.push({ block: this.b.current });
@@ -243,7 +243,7 @@ function makeDollar(b) {
       b.flush();
       const l = b.checkLabel(target, "$.gotoIf");
       l.referenced = true;
-      const c = resolveOperand(cond, i32, "$.gotoIf condition");
+      const c = resolveInt32(cond, "$.gotoIf condition");
       c.consumers.push({ block: b.current });
       const fallthrough = b.newBlock();
       b.current.term = { kind: "branch", cond: c, ifTrue: l.block, ifFalse: fallthrough };
@@ -256,7 +256,7 @@ function makeDollar(b) {
       const ts = targets.map((t, i) => b.checkLabel(t, `$.switch target ${i}`));
       const d = b.checkLabel(defaultTarget, "$.switch default");
       for (const l of [...ts, d]) l.referenced = true;
-      const idx = resolveOperand(index, i32, "$.switch index");
+      const idx = resolveInt32(index, "$.switch index");
       idx.consumers.push({ block: b.current });
       b.current.term = {
         kind: "switch",
@@ -308,7 +308,7 @@ function makeDollar(b) {
       const exit = b.newBlock();
       b.terminate({ kind: "jump", target: top });
       b.current = top;
-      const c = resolveOperand(cond, i32, "$.while condition");
+      const c = resolveInt32(cond, "$.while condition");
       c.consumers.push({ block: top });
       top.term = { kind: "branch", cond: c, ifTrue: body, ifFalse: exit };
       b.current = body;

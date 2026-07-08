@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, i32, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, WasmEmitError } from "../src/index.js";
 
 // Differential fuzzing of the relooper/liveness pipeline: generate random
 // label/goto/branch/switch programs, run them through a trivial JS
@@ -53,26 +53,26 @@ function interpret(blocks, x) {
 
 function build(blocks) {
   const mod = new Module();
-  mod.function([i32], [i32]).export("run").body((x, $) => {
-    const steps = $.variable(i32);
+  mod.function([s32], [s32]).export("run").body((x, $) => {
+    const steps = $.variable(s32);
     const labels = blocks.map(() => $.label.ahead());
     const exit = $.label.ahead();
     for (let i = 0; i < blocks.length; i++) {
       const blk = blocks[i];
       labels[i].here();
-      x.set(i32.add(i32.mul(x, i32.const(blk.mul)), i32.const(blk.add)));
-      steps.set(i32.add(steps, i32.const(1)));
-      $.gotoIf(i32.gt_s(steps, i32.const(200)), exit);
+      x.set(s32.add(s32.mul(x, s32.const(blk.mul)), s32.const(blk.add)));
+      steps.set(s32.add(steps, s32.const(1)));
+      $.gotoIf(s32.gt(steps, s32.const(200)), exit);
       const t = blk.term;
       if (t.kind === "jump") $.goto(labels[t.to]);
       else if (t.kind === "branch") {
-        $.gotoIf(i32.and(x, i32.const(1)), labels[t.t]);
+        $.gotoIf(s32.and(x, s32.const(1)), labels[t.t]);
         $.goto(labels[t.f]);
       } else if (t.kind === "switch") {
         $.switch(
-          i32.rem_u(x, i32.const(t.targets.length)),
+          u32.rem(u32.cast(x), u32.const(t.targets.length)),
           t.targets.map((j) => labels[j]),
-          labels[t.targets[0]], // rem_u keeps the index in range; default is unreachable
+          labels[t.targets[0]], // unsigned rem keeps the index in range; default is unreachable
         );
       } else $.return(x);
     }

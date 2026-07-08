@@ -34,7 +34,8 @@ export function describeNode(n) {
   switch (n.kind) {
     case "const": return `${n.type.name}.const ${n.value}`;
     case "read": return `read of ${n.variable.describe()}`;
-    case "op": return `${n.entry.ns}.${n.entry.name}`;
+    case "op": return n.display ?? `${n.entry.ns}.${n.entry.name}`;
+    case "cast": return n.display ?? "cast";
     case "call": return `call to ${n.func.debugName()}`;
     case "set": return `set of ${n.variable.describe()}`;
     case "drop": return "drop";
@@ -74,7 +75,7 @@ export function resolveOperand(x, expectedType, what) {
   if (!(n instanceof Node)) {
     let hint = "";
     if (typeof x === "number" || typeof x === "bigint") {
-      hint = ` — wrap it explicitly, e.g. ${expectedType ? expectedType.name : "i32"}.const(${x})`;
+      hint = ` — wrap it explicitly, e.g. ${expectedType ? expectedType.name : "s32"}.const(${x})`;
     }
     fail(`${what}: expected an expression, got ${typeof x}${hint}`);
   }

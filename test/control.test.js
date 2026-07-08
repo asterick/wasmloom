@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, i32 } from "../src/index.js";
+import { Module, s32 } from "../src/index.js";
 
 async function instantiate(mod, imports = {}) {
   const bytes = mod.emit();
@@ -11,14 +11,14 @@ async function instantiate(mod, imports = {}) {
 
 test("labels and gotos: sum 1..n", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("sum").body((n, $) => {
-    const acc = $.variable(i32);
+  mod.function([s32], [s32]).export("sum").body((n, $) => {
+    const acc = $.variable(s32);
     const exit = $.label.ahead();
 
     const top = $.label();
-    $.gotoIf(i32.eqz(n), exit);
-    acc.set(i32.add(acc, n));
-    n.set(i32.sub(n, i32.const(1)));
+    $.gotoIf(s32.eqz(n), exit);
+    acc.set(s32.add(acc, n));
+    n.set(s32.sub(n, s32.const(1)));
     $.goto(top);
 
     exit.here();
@@ -32,14 +32,14 @@ test("labels and gotos: sum 1..n", async () => {
 
 test("$.if / .elseIf / .else chain", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("sign").body((x, $) => {
-    const r = $.variable(i32);
-    $.if(i32.lt_s(x, i32.const(0)), ($) => {
-      r.set(i32.const(-1));
-    }).elseIf(i32.gt_s(x, i32.const(0)), ($) => {
-      r.set(i32.const(1));
+  mod.function([s32], [s32]).export("sign").body((x, $) => {
+    const r = $.variable(s32);
+    $.if(s32.lt(x, s32.const(0)), ($) => {
+      r.set(s32.const(-1));
+    }).elseIf(s32.gt(x, s32.const(0)), ($) => {
+      r.set(s32.const(1));
     }).else(($) => {
-      r.set(i32.const(0));
+      r.set(s32.const(0));
     });
     $.return(r);
   });
@@ -51,9 +51,9 @@ test("$.if / .elseIf / .else chain", async () => {
 
 test("$.if without else", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("clamp").body((x, $) => {
-    $.if(i32.gt_s(x, i32.const(100)), ($) => {
-      x.set(i32.const(100));
+  mod.function([s32], [s32]).export("clamp").body((x, $) => {
+    $.if(s32.gt(x, s32.const(100)), ($) => {
+      x.set(s32.const(100));
     });
     $.return(x);
   });
@@ -64,9 +64,9 @@ test("$.if without else", async () => {
 
 test("$.if arms may return directly", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("abs").body((x, $) => {
-    $.if(i32.lt_s(x, i32.const(0)), ($) => {
-      $.return(i32.sub(i32.const(0), x));
+  mod.function([s32], [s32]).export("abs").body((x, $) => {
+    $.if(s32.lt(x, s32.const(0)), ($) => {
+      $.return(s32.sub(s32.const(0), x));
     });
     $.return(x);
   });
@@ -77,11 +77,11 @@ test("$.if arms may return directly", async () => {
 
 test("$.while: factorial", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("fact").body((n, $) => {
-    const acc = $.variable(i32, 1);
-    $.while(i32.gt_s(n, i32.const(1)), ($) => {
-      acc.set(i32.mul(acc, n));
-      n.set(i32.sub(n, i32.const(1)));
+  mod.function([s32], [s32]).export("fact").body((n, $) => {
+    const acc = $.variable(s32, 1);
+    $.while(s32.gt(n, s32.const(1)), ($) => {
+      acc.set(s32.mul(acc, n));
+      n.set(s32.sub(n, s32.const(1)));
     });
     $.return(acc);
   });
@@ -92,16 +92,16 @@ test("$.while: factorial", async () => {
 
 test("nested while loops", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("tri").body((n, $) => {
-    const total = $.variable(i32);
-    const i = $.variable(i32, 1);
-    $.while(i32.le_s(i, n), ($) => {
-      const j = $.variable(i32, 1);
-      $.while(i32.le_s(j, i), ($) => {
-        total.set(i32.add(total, i32.const(1)));
-        j.set(i32.add(j, i32.const(1)));
+  mod.function([s32], [s32]).export("tri").body((n, $) => {
+    const total = $.variable(s32);
+    const i = $.variable(s32, 1);
+    $.while(s32.le(i, n), ($) => {
+      const j = $.variable(s32, 1);
+      $.while(s32.le(j, i), ($) => {
+        total.set(s32.add(total, s32.const(1)));
+        j.set(s32.add(j, s32.const(1)));
       });
-      i.set(i32.add(i, i32.const(1)));
+      i.set(s32.add(i, s32.const(1)));
     });
     $.return(total);
   });
@@ -111,21 +111,21 @@ test("nested while loops", async () => {
 
 test("mutual recursion via forward declarations", async () => {
   const mod = new Module();
-  const odd = mod.function([i32], [i32]).export("odd");
-  const even = mod.function([i32], [i32]).export("even");
+  const odd = mod.function([s32], [s32]).export("odd");
+  const even = mod.function([s32], [s32]).export("even");
 
   odd.body((n, $) => {
-    $.if(i32.eqz(n), ($) => {
-      $.return(i32.const(0));
+    $.if(s32.eqz(n), ($) => {
+      $.return(s32.const(0));
     }).else(($) => {
-      $.return(even.call(i32.sub(n, i32.const(1))));
+      $.return(even.call(s32.sub(n, s32.const(1))));
     });
   });
   even.body((n, $) => {
-    $.if(i32.eqz(n), ($) => {
-      $.return(i32.const(1));
+    $.if(s32.eqz(n), ($) => {
+      $.return(s32.const(1));
     }).else(($) => {
-      $.return(odd.call(i32.sub(n, i32.const(1))));
+      $.return(odd.call(s32.sub(n, s32.const(1))));
     });
   });
 
@@ -137,21 +137,21 @@ test("mutual recursion via forward declarations", async () => {
 
 test("$.switch dispatches over labels", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("pick").body((x, $) => {
+  mod.function([s32], [s32]).export("pick").body((x, $) => {
     const done = $.label.ahead();
-    const r = $.variable(i32);
+    const r = $.variable(s32);
     const c0 = $.label.ahead();
     const c1 = $.label.ahead();
     const dflt = $.label.ahead();
     $.switch(x, [c0, c1], dflt);
     c0.here();
-    r.set(i32.const(100));
+    r.set(s32.const(100));
     $.goto(done);
     c1.here();
-    r.set(i32.const(200));
+    r.set(s32.const(200));
     $.goto(done);
     dflt.here();
-    r.set(i32.const(-1));
+    r.set(s32.const(-1));
     done.here();
     $.return(r);
   });
@@ -163,12 +163,12 @@ test("$.switch dispatches over labels", async () => {
 
 test("goto skipping forward over code", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("f").body((x, $) => {
+  mod.function([s32], [s32]).export("f").body((x, $) => {
     const skip = $.label.ahead();
     $.gotoIf(x, skip);
-    $.return(i32.const(11));
+    $.return(s32.const(11));
     skip.here();
-    $.return(i32.const(22));
+    $.return(s32.const(22));
   });
   const { exports } = await instantiate(mod);
   assert.equal(exports.f(0), 11);
@@ -188,14 +188,14 @@ test("irreducible control flow is detected and rejected", () => {
   const mod = new Module();
   // A loop with two entries: entry jumps into B directly, while A falls into
   // B and B jumps back to A.
-  mod.function([i32], [i32]).export("f").body((x, $) => {
+  mod.function([s32], [s32]).export("f").body((x, $) => {
     const a = $.label.ahead();
     const b = $.label.ahead();
     $.gotoIf(x, b);
     a.here();
-    x.set(i32.add(x, i32.const(1)));
+    x.set(s32.add(x, s32.const(1)));
     b.here();
-    $.gotoIf(i32.lt_s(x, i32.const(10)), a);
+    $.gotoIf(s32.lt(x, s32.const(10)), a);
     $.return(x);
   });
   assert.throws(() => mod.emit(), /irreducible/);
@@ -203,15 +203,15 @@ test("irreducible control flow is detected and rejected", () => {
 
 test("collatz: loops, chains, and calls combined", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("collatz").body((n, $) => {
-    const steps = $.variable(i32);
-    $.while(i32.gt_s(n, i32.const(1)), ($) => {
-      $.if(i32.and(n, i32.const(1)), ($) => {
-        n.set(i32.add(i32.mul(n, i32.const(3)), i32.const(1)));
+  mod.function([s32], [s32]).export("collatz").body((n, $) => {
+    const steps = $.variable(s32);
+    $.while(s32.gt(n, s32.const(1)), ($) => {
+      $.if(s32.and(n, s32.const(1)), ($) => {
+        n.set(s32.add(s32.mul(n, s32.const(3)), s32.const(1)));
       }).else(($) => {
-        n.set(i32.div_s(n, i32.const(2)));
+        n.set(s32.div(n, s32.const(2)));
       });
-      steps.set(i32.add(steps, i32.const(1)));
+      steps.set(s32.add(steps, s32.const(1)));
     });
     $.return(steps);
   });
@@ -223,16 +223,16 @@ test("collatz: loops, chains, and calls combined", async () => {
 
 test("label placed inside a sugar callback (labels are function-scoped)", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("f").body((x, $) => {
-    const r = $.variable(i32);
+  mod.function([s32], [s32]).export("f").body((x, $) => {
+    const r = $.variable(s32);
     const inside = $.label.ahead();
-    $.gotoIf(i32.eq(x, i32.const(2)), inside);
-    $.if(i32.eq(x, i32.const(1)), ($) => {
-      r.set(i32.const(10));
+    $.gotoIf(s32.eq(x, s32.const(2)), inside);
+    $.if(s32.eq(x, s32.const(1)), ($) => {
+      r.set(s32.const(10));
       inside.here(); // placed inside the arm; jumped to from outside it
-      r.set(i32.add(r, i32.const(1)));
+      r.set(s32.add(r, s32.const(1)));
     }).else(($) => {
-      r.set(i32.const(99));
+      r.set(s32.const(99));
     });
     $.return(r);
   });

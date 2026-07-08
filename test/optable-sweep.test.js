@@ -1,14 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, i32, i64, f32, f64 } from "../src/index.js";
+import { Module, s32, u32, s64, u64, f32, f64 } from "../src/index.js";
 import { OPTABLE } from "../src/optable.js";
+import { VENEER_OPS } from "../src/expr.js";
 
-// Executes EVERY non-memory entry in the opcode table against an independent
-// JS reference implementation, over boundary-heavy input vectors, including
-// expected traps. A wrong opcode byte, swapped operands, or wrong signature
-// in the table fails here.
+// Executes EVERY public instruction constructor (each overload of every
+// veneer op) against an independent JS reference implementation of the spec
+// instruction it should select, over boundary-heavy input vectors, including
+// expected traps. This catches wrong opcode bytes, swapped operands, wrong
+// signatures, AND wrong signedness-variant selection.
 
-const T = { i32, i64, f32, f64 };
+const NS = { s32, u32, s64, u64, f32, f64 };
 const TRAP = Symbol("trap");
 const F = Math.fround;
 const U32 = (x) => x >>> 0;
@@ -282,16 +284,16 @@ function same(actual, expected) {
   return Object.is(actual, expected);
 }
 
-test("every opcode table entry executes correctly against a reference", async () => {
-  const entries = OPTABLE.filter((e) => !e.mem);
+test("every public constructor selects and executes its spec instruction", async () => {
+  const items = VENEER_OPS.filter((v) => !v.mem);
   const mod = new Module();
-  for (const e of entries) {
-    const name = `${e.ns}.${e.name}`;
-    mod.function(e.params.map((p) => T[p]), e.results.map((r) => T[r]))
-      .export(name)
+  const nameOf = (v) => `${v.ns}.${v.name}(${v.params.map((p) => p.name).join(",")})`;
+  for (const v of items) {
+    mod.function(v.params, v.results)
+      .export(nameOf(v))
       .body((...args) => {
         const $ = args.pop();
-        $.return(T[e.ns][e.name](...args));
+        $.return(NS[v.ns][v.name](...args));
       });
   }
   const bytes = mod.emit();
@@ -299,14 +301,15 @@ test("every opcode table entry executes correctly against a reference", async ()
   const { instance } = await WebAssembly.instantiate(bytes);
 
   let cases = 0;
-  for (const e of entries) {
-    const name = `${e.ns}.${e.name}`;
-    const ref = REFS[name];
-    assert.ok(ref, `missing reference implementation for ${name} — add one to this sweep`);
-    const fn = instance.exports[name];
-    for (const args of combos(e.params)) {
-      if (SKIP[name]?.(...args)) continue;
-      const label = `${name}(${args.map(String).join(", ")})`;
+  for (const v of items) {
+    const specKey = `${v.entry.ns}.${v.entry.name}`;
+    const ref = REFS[specKey];
+    assert.ok(ref, `missing reference implementation for ${specKey} — add one to this sweep`);
+    const fn = instance.exports[nameOf(v)];
+    const vectors = combos(v.params.map((p) => p.wasmType.name));
+    for (const args of vectors) {
+      if (SKIP[specKey]?.(...args)) continue;
+      const label = `${nameOf(v)} [${specKey}] (${args.map(String).join(", ")})`;
       const expected = ref(...args);
       if (expected === TRAP) {
         assert.throws(() => fn(...args), WebAssembly.RuntimeError, `${label} should trap`);
@@ -318,4 +321,11 @@ test("every opcode table entry executes correctly against a reference", async ()
     }
   }
   assert.ok(cases > 5000, `sweep only ran ${cases} cases`);
+});
+
+test("every optable entry is reachable through some public constructor", () => {
+  const covered = new Set(VENEER_OPS.map((v) => `${v.entry.ns}.${v.entry.name}`));
+  for (const e of OPTABLE) {
+    assert.ok(covered.has(`${e.ns}.${e.name}`), `optable entry ${e.ns}.${e.name} is orphaned`);
+  }
 });

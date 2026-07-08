@@ -167,7 +167,7 @@ function writeLimits(s, limits) {
 }
 
 function writeConst(s, node) {
-  switch (node.type.name) {
+  switch (node.type.wasmType.name) {
     case "i32": s.u8(OPS.i32_const).s32(node.value); break;
     case "i64": s.u8(OPS.i64_const).s64(node.value); break;
     case "f32": s.u8(OPS.f32_const).f32(node.value); break;

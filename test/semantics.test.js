@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, i32 } from "../src/index.js";
+import { Module, s32, u32 } from "../src/index.js";
 
 async function instantiate(mod, imports = {}) {
   const bytes = mod.emit();
@@ -11,10 +11,10 @@ async function instantiate(mod, imports = {}) {
 
 test("multi-use expression evaluates once (auto-bound)", async () => {
   const mod = new Module();
-  const next = mod.function([], [i32]).import("env", "next");
-  mod.function([], [i32]).export("f").body(($) => {
+  const next = mod.function([], [s32]).import("env", "next");
+  mod.function([], [s32]).export("f").body(($) => {
     const x = next.call();
-    $.return(i32.add(x, x)); // one call, value used twice
+    $.return(s32.add(x, x)); // one call, value used twice
   });
   let calls = 0;
   const { exports } = await instantiate(mod, { env: { next: () => { calls++; return 5; } } });
@@ -24,12 +24,12 @@ test("multi-use expression evaluates once (auto-bound)", async () => {
 
 test("multi-use evaluates at creation point, not first use", async () => {
   const mod = new Module();
-  const g = mod.variable(i32, 1);
-  mod.function([], [i32]).export("f").body(($) => {
-    const snapshot = i32.add(g, i32.const(0)); // reads g = 1 here
-    g.set(i32.const(42));
+  const g = mod.variable(s32, 1);
+  mod.function([], [s32]).export("f").body(($) => {
+    const snapshot = s32.add(g, s32.const(0)); // reads g = 1 here
+    g.set(s32.const(42));
     // snapshot used twice → evaluated at creation, before the set above
-    $.return(i32.add(snapshot, snapshot));
+    $.return(s32.add(snapshot, snapshot));
   });
   const { exports } = await instantiate(mod);
   assert.equal(exports.f(), 2);
@@ -37,10 +37,10 @@ test("multi-use evaluates at creation point, not first use", async () => {
 
 test("single-use expression inlines at consumption", async () => {
   const mod = new Module();
-  const g = mod.variable(i32, 1);
-  mod.function([], [i32]).export("f").body(($) => {
-    const late = i32.add(g, i32.const(0)); // single use → evaluated at $.return below
-    g.set(i32.const(42));
+  const g = mod.variable(s32, 1);
+  mod.function([], [s32]).export("f").body(($) => {
+    const late = s32.add(g, s32.const(0)); // single use → evaluated at $.return below
+    g.set(s32.const(42));
     $.return(late); // sees g = 42
   });
   const { exports } = await instantiate(mod);
@@ -49,11 +49,11 @@ test("single-use expression inlines at consumption", async () => {
 
 test("$.while condition re-evaluates every iteration", async () => {
   const mod = new Module();
-  mod.function([i32], [i32]).export("count").body((n, $) => {
-    const steps = $.variable(i32);
-    $.while(i32.gt_s(n, i32.const(0)), ($) => {
-      n.set(i32.sub(n, i32.const(1)));
-      steps.set(i32.add(steps, i32.const(1)));
+  mod.function([s32], [s32]).export("count").body((n, $) => {
+    const steps = $.variable(s32);
+    $.while(s32.gt(n, s32.const(0)), ($) => {
+      n.set(s32.sub(n, s32.const(1)));
+      steps.set(s32.add(steps, s32.const(1)));
     });
     $.return(steps);
   });
@@ -63,7 +63,7 @@ test("$.while condition re-evaluates every iteration", async () => {
 
 test("$.drop discards a call result", async () => {
   const mod = new Module();
-  const next = mod.function([], [i32]).import("env", "next");
+  const next = mod.function([], [s32]).import("env", "next");
   mod.function([], []).export("f").body(($) => {
     $.drop(next.call());
   });
@@ -75,16 +75,16 @@ test("$.drop discards a call result", async () => {
 
 test("locals with disjoint live ranges share a slot", () => {
   const mod = new Module();
-  mod.function([], [i32]).export("f").body(($) => {
-    const a = $.variable(i32, 1);
-    const sum = $.variable(i32);
-    sum.set(i32.add(sum, a)); // a's last use
-    const b = $.variable(i32, 2); // may reuse a's slot
-    sum.set(i32.add(sum, b));
+  mod.function([], [s32]).export("f").body(($) => {
+    const a = $.variable(s32, 1);
+    const sum = $.variable(s32);
+    sum.set(s32.add(sum, a)); // a's last use
+    const b = $.variable(s32, 2); // may reuse a's slot
+    sum.set(s32.add(sum, b));
     $.return(sum);
   });
   const bytes = mod.emit();
-  // Parse the code section's locals declaration: expect fewer than 3 i32 locals.
+  // Parse the code section's locals declaration: expect fewer than 3 s32 locals.
   const totalLocals = countLocals(bytes);
   assert.ok(totalLocals <= 2, `expected slot sharing to use ≤ 2 locals, got ${totalLocals}`);
 });
@@ -119,9 +119,9 @@ test("single-use call evaluates at consumption, after later statements (pinned)"
   // consumption — even past intervening statements. This pins the documented
   // reordering so it can never silently change.
   const mod = new Module();
-  const probe = mod.function([], [i32]).import("env", "probe");
+  const probe = mod.function([], [s32]).import("env", "probe");
   const mark = mod.function([], []).import("env", "mark");
-  mod.function([], [i32]).export("f").body(($) => {
+  mod.function([], [s32]).export("f").body(($) => {
     const a = probe.call(); // single-use: created here...
     mark.call(); // ...but this statement runs first
     $.return(a);
@@ -136,11 +136,11 @@ test("single-use call evaluates at consumption, after later statements (pinned)"
 
 test("nested multi-use expressions materialize once each", async () => {
   const mod = new Module();
-  const probe = mod.function([], [i32]).import("env", "probe");
-  mod.function([], [i32]).export("f").body(($) => {
+  const probe = mod.function([], [s32]).import("env", "probe");
+  mod.function([], [s32]).export("f").body(($) => {
     const x = probe.call(); // multi-use
-    const y = i32.add(x, x); // itself multi-use
-    $.return(i32.add(y, y));
+    const y = s32.add(x, x); // itself multi-use
+    $.return(s32.add(y, y));
   });
   let calls = 0;
   const { instance } = await WebAssembly.instantiate(mod.emit(), {
@@ -152,12 +152,12 @@ test("nested multi-use expressions materialize once each", async () => {
 
 test("spilled tuple handles can be read many times", async () => {
   const mod = new Module();
-  const divmod = mod.function([i32, i32], [i32, i32]).body((a, b, $) => {
-    $.return(i32.div_u(a, b), i32.rem_u(a, b));
+  const divmod = mod.function([u32, u32], [u32, u32]).body((a, b, $) => {
+    $.return(u32.div(a, b), u32.rem(a, b));
   });
-  mod.function([i32, i32], [i32]).export("f").body((a, b, $) => {
+  mod.function([u32, u32], [u32]).export("f").body((a, b, $) => {
     const [q, r] = divmod.call(a, b);
-    $.return(i32.add(i32.add(q, q), i32.add(r, r)));
+    $.return(u32.add(u32.add(q, q), u32.add(r, r)));
   });
   const { instance } = await WebAssembly.instantiate(mod.emit());
   assert.equal(instance.exports.f(17, 5), 2 * 3 + 2 * 2);
@@ -165,10 +165,10 @@ test("spilled tuple handles can be read many times", async () => {
 
 test("statements after $.return are unreachable and pruned", async () => {
   const mod = new Module();
-  const log = mod.function([i32], []).import("env", "log");
-  mod.function([], [i32]).export("f").body(($) => {
-    $.return(i32.const(1));
-    log.call(i32.const(999)); // dead code: recorded, then pruned
+  const log = mod.function([s32], []).import("env", "log");
+  mod.function([], [s32]).export("f").body(($) => {
+    $.return(s32.const(1));
+    log.call(s32.const(999)); // dead code: recorded, then pruned
   });
   const seen = [];
   const { instance } = await WebAssembly.instantiate(mod.emit(), {

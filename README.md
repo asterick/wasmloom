@@ -8,16 +8,16 @@ See [DESIGN.md](DESIGN.md) for the full design contract.
 ## Example
 
 ```js
-import { Module, i32 } from "wasmemit";
+import { Module, s32 } from "wasmemit";
 
 const mod = new Module();
-const log = mod.function([i32], []).import("env", "log");
+const log = mod.function([s32], []).import("env", "log");
 
-mod.function([i32], [i32]).export("fact").body((n, $) => {
-  const acc = $.variable(i32, 1);
-  $.while(i32.gt_s(n, i32.const(1)), ($) => {
-    acc.set(i32.mul(acc, n));
-    n.set(i32.sub(n, i32.const(1)));
+mod.function([s32], [s32]).export("fact").body((n, $) => {
+  const acc = $.variable(s32, 1);
+  $.while(s32.gt(n, s32.const(1)), ($) => {
+    acc.set(s32.mul(acc, n));
+    n.set(s32.sub(n, s32.const(1)));
   });
   log.call(acc);
   $.return(acc);
@@ -36,6 +36,12 @@ slot allocation → relooper → encoder pipeline; expressions are type-checked
 eagerly at the builder call that creates them.
 
 ## Status
+
+Signedness is first-class: `s32`/`u32`/`s64`/`u64` select the right wasm
+instruction variant (`u32.div` emits `i32.div_u`), conversions dispatch on
+their operand's type (`f64.convert(x)`), and `u32.cast(x)`/`s32.cast(x)`
+retype across signedness at zero cost. Mixed-sign arithmetic is an eager
+build error.
 
 Working: functions (declare/body/import/export, forward decls, mutual
 recursion), the full Wasm 2.0 numeric instruction set, module and function
