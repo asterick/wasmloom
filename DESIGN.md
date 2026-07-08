@@ -17,7 +17,11 @@ toolchain; emits binary `.wasm` bytes directly.
 | Block values | Conditional values flow through locals (plus `select`); no typed-block results |
 | Expression reuse | Auto-bound to hidden locals; local slots reused when live ranges end |
 | IR | CFG of basic blocks from day one; relooper reconstructs structure at emit |
+| Local access | A local/param/global handle *is* a value expression; writes are `handle.set(v)` |
+| Op naming | Mirror `.wat` exactly: `i32.div_s`, `i64.extend_i32_u`, `memory.copy` |
+| Zero-result ops | Auto-anchor as statements at their creation point (`i32.store(...)` is a statement) |
 | i64 immediates | BigInt always; plain numbers only when `Number.isSafeInteger`, else throw |
+| i32/f32 consts | `i32.const` throws on non-integers or out-of-range (unsigned spellings OK); `f32.const` rounds |
 | Diagnostics | `new Module({ debug: true })` captures creation stack traces for emit-time errors |
 | Types | Plain JS with JSDoc annotations |
 | Testing | Round-trip: instantiate output with V8 (`node --test`), assert executed results |
@@ -125,12 +129,25 @@ of blocks — conditional values are written to locals in each arm, or use
 
 ### Expressions
 
-- **Expression namespaces** (`i32`, `i64`, `f32`, `f64`, `ref`…) hold
-  value-producing constructors: `i32.add(a, b)`, `f64.const(1.5)`, `fn.call(...)`.
+- **Expression namespaces** (`i32`, `i64`, `f32`, `f64`, `ref`, `memory`…) hold
+  instruction constructors: `i32.add(a, b)`, `f64.const(1.5)`, `fn.call(...)`.
   Each returns a node with a known result type — checked eagerly, no implicit
   conversions (mirroring wasm; conversions are explicit instructions).
-- `i64` immediates accept BigInt always, and plain numbers only when
-  `Number.isSafeInteger(n)` — anything else throws.
+- Constructor names **mirror `.wat` exactly**: `i32.div_s`, `i32.shr_u`,
+  `i64.extend_i32_s`, `i32.trunc_sat_f64_u`, `memory.copy` — greppable against
+  the spec with zero translation.
+- A local, param, or global handle **is itself a value expression** — using it
+  anywhere reads it at that point (reads are unlimited and cheap); writes are
+  `handle.set(value)`.
+- **Zero-result instructions are statements**: constructors whose instruction
+  produces no value (`i32.store`, `memory.copy`, a call to a `[] -> []`
+  function) append to the current block at the point they're called —
+  consistent with the creation-point rule below. `$` stays small: locals,
+  labels, control flow, `$.return`, `$.drop`.
+- Immediates are strict: `i64.const` accepts BigInt always and plain numbers
+  only when `Number.isSafeInteger(n)`; `i32.const` throws on non-integers or
+  values outside `[-2^31, 2^32)` (unsigned spellings like `0xFFFFFFFF` are
+  accepted); `f32.const` rounds doubles to float32 (unavoidable).
 
 ### Evaluation-order semantics
 
@@ -144,8 +161,10 @@ Expression nodes are *recorded*, not emitted, as the body callback runs:
    dominator tree — now essential given arbitrary gotos), that's a build error.
 4. **Multi-value** call results spill to locals immediately and destructure:
    `const [q, r] = divmod.call(a, b)`.
-5. An effectful node (call, store) never consumed by a statement is a build
-   error at body completion — not a silent no-op.
+5. Zero-result nodes are statements (anchored at creation, rule 2's point).
+   An effectful node **with** results (e.g. a call returning a value) that is
+   never consumed is a build error at body completion — discard explicitly
+   with `$.drop(...)`. Never a silent no-op.
 
 ### Diagnostics
 
