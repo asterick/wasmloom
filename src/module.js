@@ -208,9 +208,19 @@ function checkLimits(limits, what) {
 
 /** A WebAssembly module under construction. */
 export class Module {
-  /** @param {{debug?: boolean}} [opts] debug captures creation stack traces for emit-time errors */
+  /**
+   * @param {{debug?: boolean, permissive?: boolean, promote?: boolean}} [opts]
+   *  - debug: capture creation stack traces for emit-time errors
+   *  - permissive: bit-level leniency within a storage width — conditions
+   *    accept integers (non-zero is true), integer positions accept the
+   *    opposite signedness and bool, bool positions test integers for ≠0
+   *  - promote: value-exact lifting into an op's namespace type
+   *    (s32→s64, u32→s64/u64, f32→f64, s32/u32→f64, bool→anything numeric)
+   */
   constructor(opts = {}) {
     this.debug = opts.debug ?? false;
+    this.permissive = opts.permissive ?? false;
+    this.promote = opts.promote ?? false;
     this.functions = [];
     this.variables = [];
     this.memories = [];

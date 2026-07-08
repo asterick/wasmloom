@@ -1,7 +1,7 @@
 import { fail } from "./errors.js";
 import { OPTABLE } from "./optable.js";
 import { i32 as I32, i64 as I64, f32, f64, s32, u32, s64, u64, bool } from "./types.js";
-import { makeNode, resolveOperand } from "./node.js";
+import { makeNode, resolveOperand, setCoercion } from "./node.js";
 import { requireBuilder } from "./context.js";
 
 // Signedness lives in the public type (s32/u32/s64/u64); the optable stays
@@ -30,19 +30,44 @@ const U32_MAX = 0xffffffff;
 /** Any 32-bit integer (s32 or u32) — used where wasm is sign-agnostic by position. */
 export function resolveInt32(x, what) {
   const v = resolveOperand(x, null, what);
-  if (v.type.wasmType !== I32 || v.type === bool) {
+  if (v.type.wasmType !== I32 || (v.type === bool && !currentPermissive())) {
     fail(`${what}: expected a 32-bit integer (s32 or u32), got ${v.type.name}`);
   }
   return v;
 }
 
-/** Conditions are strictly bool — comparisons produce it; bool.of(x) tests integers. */
+function currentPermissive() {
+  const b = requireBuilder("operand resolution");
+  return b.module.permissive;
+}
+
+/** Zero-cost retype (same storage bits, new builder-level type). */
+function retype(v, target) {
+  return makeNode("cast", { type: target, results: [target], operands: [v], display: "implicit cast" });
+}
+
+/** Real ≠0 test (eqz twice — no constant needed). */
+function truthiness(v, display) {
+  const eqzEntry = entryOf(v.type.wasmType === I32 ? "i32.eqz" : "i64.eqz");
+  const isZero = makeNode("op", { results: [bool], entry: eqzEntry, operands: [v], display });
+  return makeNode("op", { results: [bool], entry: entryOf("i32.eqz"), operands: [isZero], display });
+}
+
+/**
+ * Conditions are strictly bool — comparisons produce it; bool.of(x) tests
+ * integers. Under permissive mode integers are accepted: 32-bit ones retype
+ * for free (the consuming br_if/select already tests non-zero), 64-bit ones
+ * insert a real ≠0 test.
+ */
 export function resolveBool(x, what) {
   const v = resolveOperand(x, null, what);
-  if (v.type !== bool) {
-    fail(`${what}: expected bool (comparisons produce bool; use bool.of(x) to test an integer), got ${v.type.name}`);
+  if (v.type === bool) return v;
+  const b = requireBuilder(what);
+  if (b.module.permissive) {
+    if (v.type.wasmType === I32 && v.type !== bool) return retype(v, bool);
+    if (v.type.wasmType === I64) return truthiness(v, "implicit bool.of");
   }
-  return v;
+  fail(`${what}: expected bool (comparisons produce bool; use bool.of(x) to test an integer), got ${v.type.name}`);
 }
 
 // --- constants ---------------------------------------------------------------
@@ -326,9 +351,7 @@ bool.of = function (x) {
   if (v.type === bool || (v.type.wasmType !== I32 && v.type.wasmType !== I64)) {
     fail(`bool.of: expected an integer (s32/u32/s64/u64), got ${v.type.name}`);
   }
-  const eqzEntry = entryOf(v.type.wasmType === I32 ? "i32.eqz" : "i64.eqz");
-  const isZero = makeNode("op", { results: [bool], entry: eqzEntry, operands: [v], display: "bool.of" });
-  return makeNode("op", { results: [bool], entry: entryOf("i32.eqz"), operands: [isZero], display: "bool.of" });
+  return truthiness(v, "bool.of");
 };
 for (const [from, key] of [[s32, "i32.eqz"], [u32, "i32.eqz"], [s64, "i64.eqz"], [u64, "i64.eqz"]]) {
   VENEER_OPS.push({ ns: "bool", name: "of", params: [from], results: [bool], entry: entryOf(key) });
@@ -436,5 +459,49 @@ for (const [ns, name, params, results] of [
 ]) {
   VENEER_OPS.push({ ns, name, params, results, entry: entryOf(`${ns}.${name}`), mem: "bulk" });
 }
+
+// --- opt-in coercion modes -----------------------------------------------------
+// Strict is the default. `permissive` is bit-level leniency within a storage
+// width; `promote` is value-exact lifting into the expected type (never lossy,
+// never narrowing, never float→int). Both are per-Module flags.
+
+const INTS = new Set([s32, u32, s64, u64]);
+
+/** promote: expected type → (operand type → conversion spec) — value-exact only */
+const PROMOTIONS = new Map([
+  [s64, new Map([[s32, "i64.extend_i32_s"], [u32, "i64.extend_i32_u"], [bool, "i64.extend_i32_u"]])],
+  [u64, new Map([[u32, "i64.extend_i32_u"], [bool, "i64.extend_i32_u"]])],
+  [s32, new Map([[bool, "retype"]])],
+  [u32, new Map([[bool, "retype"]])],
+  [f64, new Map([
+    [f32, "f64.promote_f32"],
+    [s32, "f64.convert_i32_s"],
+    [u32, "f64.convert_i32_u"],
+    [bool, "f64.convert_i32_u"],
+  ])],
+  [f32, new Map([[bool, "f32.convert_i32_u"]])],
+]);
+
+setCoercion((v, expected, builder) => {
+  const { permissive, promote } = builder.module;
+  if (permissive) {
+    // Same storage width, integer/bool targets: a free retype.
+    if (INTS.has(expected) && expected.wasmType === v.type.wasmType) {
+      return retype(v, expected);
+    }
+    // Integer where a bool is expected: a real ≠0 test.
+    if (expected === bool && INTS.has(v.type)) {
+      return truthiness(v, "implicit bool.of");
+    }
+  }
+  if (promote) {
+    const spec = PROMOTIONS.get(expected)?.get(v.type);
+    if (spec === "retype") return retype(v, expected);
+    if (spec) {
+      return makeNode("op", { results: [expected], entry: entryOf(spec), operands: [v], display: "promotion" });
+    }
+  }
+  return null;
+});
 
 export { s32, u32, s64, u64, f32, f64, bool };

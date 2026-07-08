@@ -65,8 +65,18 @@ export function makeNode(kind, fields, opts = {}) {
 }
 
 /**
+ * Coercion hook, registered by expr.js: given (node, expectedType, builder),
+ * return a replacement node under permissive/promote modes, or null.
+ */
+let coerce = null;
+export function setCoercion(fn) {
+  coerce = fn;
+}
+
+/**
  * Coerce an operand (Node or variable handle) into a single-value Node of the
- * expected type, with eager validation.
+ * expected type, with eager validation. Under permissive/promote modes a
+ * mismatch may be repaired by the registered coercion hook instead of failing.
  * @returns {Node}
  */
 export function resolveOperand(x, expectedType, what) {
@@ -87,6 +97,8 @@ export function resolveOperand(x, expectedType, what) {
     fail(`${what}: expression belongs to a different function body`, n);
   }
   if (expectedType && n.type !== expectedType) {
+    const lifted = coerce?.(n, expectedType, b);
+    if (lifted) return lifted;
     fail(`${what}: expected ${expectedType.name}, got ${n.type.name}`, n);
   }
   return n;

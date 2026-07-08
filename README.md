@@ -43,7 +43,10 @@ their operand's type (`f64.convert(x)`), and `u32.cast(x)`/`s32.cast(x)`
 retype across signedness at zero cost. Mixed-sign arithmetic is an eager
 build error. Truth is first-class too: comparisons produce `bool`,
 conditions require it (`bool.of(x)` tests integers), and `bool` carries
-`and`/`or`/`xor`/`not`.
+`and`/`or`/`xor`/`not`. Both barriers can be opted out of per module:
+`new Module({ permissive: true })` allows same-width sign mixing and integer
+truthiness, and `{ promote: true }` lifts operands into an op's namespace
+type when value-exact (`f64.add(xf32, ys32)`). Strict is always the default.
 
 Working: functions (declare/body/import/export, forward decls, mutual
 recursion), the full Wasm 2.0 numeric instruction set, module and function
