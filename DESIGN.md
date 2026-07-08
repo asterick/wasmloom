@@ -211,6 +211,30 @@ Expression nodes are *recorded*, not emitted, as the body callback runs:
 creation, so emit-time errors (unplaced label, non-dominated use, unconsumed
 effect) point at the user's source line. Off by default — zero cost otherwise.
 
+## Deferred — API not yet designed (DO NOT IMPLEMENT)
+
+The following are recognized but **must not be implemented until the API is
+discussed and locked down** in a future planning session. Nothing in the core
+may assume a shape for these beyond what's noted here.
+
+- **Tables & indirect calls** — table handles, `call_indirect` (explicit
+  signature at the call site), `table.*` instructions, element segments
+  (active/passive/declared).
+- **Reference types as values** — `funcref`/`externref` variables and params,
+  `ref.func` / `ref.null` / `ref.is_null`, typed `select` for references.
+- **Memory, fully specified** — data segments (active/passive,
+  `memory.init`/`data.drop`), `memory.size/grow/fill/copy`, the sized
+  load/store variants (`i32.load8_s`, …) and alignment defaults. (`mod.memory`
+  limits + basic handle-explicit `i32.load`/`i32.store` remain in scope for
+  the core.)
+- **SIMD (`v128`)** — in the Wasm 2.0 spec but explicitly descoped; the opcode
+  table absorbs it later without design changes.
+- **`select`** — exact shape (per-type vs generic) undecided.
+- **Custom sections** — name section emission (possibly tied to `debug`),
+  raw `mod.customSection(name, bytes)` passthrough, `.name()` attribute.
+- Already out of spec scope (no design needed yet): GC types, exception
+  handling, threads/atomics, tail calls, multi-memory, memory64.
+
 ## Compilation pipeline
 
 ```
@@ -270,4 +294,6 @@ test/
    "emit and run an add function" test.
 4. Labels/goto + relooper (reducible cases), then `$.if`/`$.while` sugar.
 5. Liveness + slot allocation, auto-binding, dominance checks.
-6. Irreducible-CFG handling, `$.switch`, remaining Wasm 2.0 surface.
+6. Irreducible-CFG handling, `$.switch`, `$.unreachable`.
+7. Deferred items — each only after its API is designed and agreed
+   (see *Deferred* above).
