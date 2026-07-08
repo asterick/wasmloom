@@ -236,7 +236,51 @@ function compileFunction(fn) {
   const liveOut = computeLiveness(builder.blocks, code, cfg);
   const { slotOf, localsDecl } = allocateSlots(builder, code, liveOut, cfg);
   const tree = reloop(builder, cfg, code);
+  elideFreshZeroInits(tree, slotOf);
   return { tree, slotOf, localsDecl };
+}
+
+/**
+ * Wasm zero-initializes locals, so a synthetic `const 0; set s` in the
+ * function's straight-line entry prefix is redundant when slot `s` has not
+ * been written yet. Descends through `block` wrappers only — a `loop`
+ * header's code re-runs on the back edge, where a reset is semantic — and
+ * stops at the first structured/control item. Never touches param slots
+ * (they hold arguments, not zero).
+ */
+function elideFreshZeroInits(tree, slotOf) {
+  let seq = tree;
+  while (seq[0]?.op === "block") seq = seq[0].body;
+  const written = new Set();
+  const LINEAR = new Set(["const", "get", "set", "gget", "gset", "op", "call", "call_indirect", "reffunc", "drop"]);
+  for (let i = 0; i < seq.length; i++) {
+    const item = seq[i];
+    if (!LINEAR.has(item.op ?? item.k)) break;
+    if (item.k !== "set") continue;
+    const slot = slotOf.get(item.v);
+    const prev = seq[i - 1];
+    if (
+      item.v.kind !== "param" &&
+      !written.has(slot) &&
+      prev?.k === "const" &&
+      isZeroConst(prev)
+    ) {
+      seq.splice(i - 1, 2);
+      i -= 2;
+      continue; // the slot stays fresh — a later redundant re-init elides too
+    }
+    written.add(slot);
+  }
+}
+
+function isZeroConst(item) {
+  switch (item.type.wasmType.name) {
+    case "i32": case "f32": case "f64": return Object.is(item.value, 0);
+    case "i64": return item.value === 0n;
+    case "v128": return item.value.every((b) => b === 0);
+    case "funcref": case "externref": return item.value === null;
+    default: return false;
+  }
 }
 
 function writeLimits(s, limits) {
@@ -332,7 +376,17 @@ function writeBody(w, { tree, slotOf, localsDecl }) {
 }
 
 function writeSeq(w, items, slotOf) {
-  for (const item of items) writeItem(w, item, slotOf);
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const next = items[i + 1];
+    // Peephole: `set s; get s` (same slot) is exactly local.tee.
+    if (item.k === "set" && next?.k === "get" && slotOf.get(item.v) === slotOf.get(next.v)) {
+      w.u8(OPS.local_tee).u32(slotOf.get(item.v));
+      i++;
+      continue;
+    }
+    writeItem(w, item, slotOf);
+  }
 }
 
 function writeItem(w, item, slotOf) {

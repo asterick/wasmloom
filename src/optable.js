@@ -419,6 +419,7 @@ export const OPS = {
   ref_func: 0xd2,
   local_get: 0x20,
   local_set: 0x21,
+  local_tee: 0x22,
   global_get: 0x23,
   global_set: 0x24,
   i32_const: 0x41,

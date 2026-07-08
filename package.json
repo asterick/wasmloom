@@ -4,11 +4,16 @@
   "description": "A JavaScript module for generating WebAssembly modules using expression builders",
   "type": "module",
   "main": "src/index.js",
+  "types": "index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./src/index.js"
+    }
   },
   "scripts": {
-    "test": "node --test 'test/**/*.test.js'"
+    "test": "node --test 'test/**/*.test.js'",
+    "types": "node scripts/generate-dts.js"
   },
   "keywords": [
     "webassembly",
@@ -27,6 +32,7 @@
     "node": ">=18"
   },
   "files": [
-    "src"
+    "src",
+    "index.d.ts"
   ]
 }

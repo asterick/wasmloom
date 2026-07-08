@@ -167,6 +167,7 @@ function defOp(nsType, name, entry, params, results) {
     ns: nsType.name,
     name,
     params: params.map((p) => (p === ANY32 ? s32 : p)),
+    any32: params.some((p) => p === ANY32) ? params.map((p) => p === ANY32) : undefined,
     results,
     entry,
     mem: entry.mem,

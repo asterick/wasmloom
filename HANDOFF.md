@@ -6,7 +6,7 @@ State snapshot for picking this project back up. Last updated: 2026-07-08.
 
 A JavaScript library for generating WebAssembly binaries via expression
 builders — no external toolchain, `mod.emit()` → `Uint8Array`. The whole
-Wasm 2.0 surface is implemented, **including fixed-width SIMD**. 182 tests,
+Wasm 2.0 surface is implemented, **including fixed-width SIMD**. 188 tests,
 all passing (`npm test`, Node ≥ 18, zero dependencies).
 
 **`DESIGN.md` is the contract.** Every API shape in it was explicitly
@@ -32,7 +32,9 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
                      pooled by wasm storage type)
                  ─► relooper (passes/relooper.js: Ramsey's "Beyond
                      Relooper"; expects reducible input — reduce runs first)
-                 ─► encoder (encode/encoder.js + leb.js: sections, LEB128)
+                 ─► encoder (encode/encoder.js + leb.js: sections, LEB128;
+                     peepholes: set+get → local.tee, fresh-slot zero-init
+                     elision in the entry prefix — never loops, never params)
 ```
 
 - `src/types.js` — `ValType`s. Public types (`s32`/`u32`/`s64`/`u64`/`f32`/
@@ -99,21 +101,27 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
   byte-determinism across builds.
 - Feature files: `basic`, `control`, `module`, `semantics`, `memory`,
   `tables`, `signedness`, `bool`, `select`, `promotion`, `modes`,
-  `errors` (~35 eager-error paths), `binary` (section-level asserts),
-  `slots-stress`, `limits` (depth canaries), `leb`.
+  `errors` (~35 eager-error paths), `binary` (section-level asserts and
+  peephole byte checks), `slots-stress`, `limits` (depth canaries), `leb`,
+  `dts` (generated declarations staleness).
 
 ## Queue (in priority order)
 
-1. **Polish (no design needed)**: `local.tee` peephole (set+get pairs),
-   drop synthetic zero-init when a slot is provably fresh, generated
-   `.d.ts` from JSDoc.
-2. **Pinned (do not do unless asked)**: custom sections / name section —
+The active queue is empty — the wasm 2.0 surface, lowering, and polish are
+done. Remaining items are pinned:
+
+1. **Pinned (do not do unless asked)**: custom sections / name section —
    see DESIGN.md's "Pinned" section.
 
 ## Working conventions
 
 - Repo: github.com/asterick/wasmemit (private), branch `main`, commit
   style: imperative summary + body, Claude co-author trailer.
+- `index.d.ts` is GENERATED (`npm run types`, scripts/generate-dts.js) from
+  `VENEER_OPS` + a hand-maintained skeleton; `test/dts.test.js` fails when
+  stale. After touching the veneer, regenerate and commit both. Typecheck
+  changes to the generator with `npx -p typescript tsc --noEmit --strict
+  index.d.ts` (not part of `npm test` — no dev dependencies).
 - After every ratified design decision: update DESIGN.md (decisions table
   + relevant section) in the same commit as the implementation.
 - Tests are the oracle: every feature lands with behavioral round-trip

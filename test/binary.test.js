@@ -149,3 +149,62 @@ test("emit() stays byte-stable across the full feature surface", async () => {
   assert.equal(instance.exports.f(4, 0.5), 23);
   assert.equal(instance.exports.g.value, 21n);
 });
+
+test("peephole: set+get of the same slot emits local.tee, not set-then-get", async () => {
+  const mod = new Module();
+  // v is set once and read immediately (then again) — the set/get pair must
+  // collapse to local.tee (0x22) and no local.set (0x21) should remain.
+  // Constants are 1/3 so neither opcode byte can appear as an immediate.
+  mod.function([s32], [s32]).export("f").body((x, $) => {
+    const v = $.variable(s32);
+    v.set(s32.add(x, s32.const(1)));
+    $.return(s32.mul(v, s32.const(3)));
+  });
+  const bytes = mod.emit();
+  const code = [...parseSections(bytes).get(10)];
+  assert.ok(code.includes(0x22), "expected a local.tee in the body");
+  assert.ok(!code.includes(0x21), "expected no local.set to remain");
+  const { instance } = await WebAssembly.instantiate(bytes);
+  assert.equal(instance.exports.f(4), 15);
+});
+
+test("peephole: synthetic zero-init on a fresh slot is elided", async () => {
+  const mod = new Module();
+  mod.function([], [s64]).export("zero").body(($) => {
+    const v = $.variable(s64); // never written — wasm zero-init suffices
+    $.return(v);
+  });
+  const bytes = mod.emit();
+  const code = [...parseSections(bytes).get(10)];
+  assert.ok(!code.includes(0x42), "expected no i64.const in the body");
+  const { instance } = await WebAssembly.instantiate(bytes);
+  assert.equal(instance.exports.zero(), 0n);
+});
+
+test("peephole safety: a zero-init inside a loop body is a semantic reset", async () => {
+  const mod = new Module();
+  // t re-declares (and so re-zeroes) every iteration; if the init were
+  // wrongly elided, t would carry its value across iterations.
+  mod.function([s32], [s32]).export("f").body((n, $) => {
+    const sum = $.variable(s32);
+    $.while(s32.gt(n, s32.const(0)), ($) => {
+      const t = $.variable(s32);
+      t.set(s32.add(t, s32.const(1)));
+      sum.set(s32.add(sum, t));
+      n.set(s32.sub(n, s32.const(1)));
+    });
+    $.return(sum);
+  });
+  const { instance } = await WebAssembly.instantiate(mod.emit());
+  assert.equal(instance.exports.f(5), 5); // t is 1 each iteration, not 1..5
+});
+
+test("peephole safety: writing zero to a param is never elided", async () => {
+  const mod = new Module();
+  mod.function([s32], [s32]).export("f").body((x, $) => {
+    x.set(s32.const(0));
+    $.return(x);
+  });
+  const { instance } = await WebAssembly.instantiate(mod.emit());
+  assert.equal(instance.exports.f(42), 0);
+});

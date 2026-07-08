@@ -31,7 +31,7 @@ toolchain; emits binary `.wasm` bytes directly.
 | SIMD masks | Comparisons produce dedicated mask types (`m8x16`/`m16x8`/`m32x4`/`m64x2`) — the SIMD analog of `bool`. `bitselect` requires a shape-matched mask; `any_true`/`all_true` (→ `bool`) and `bitmask` (→ `u32`) live on masks. Masks are not data and not conditions |
 | SIMD v128 ops | Lane-agnostic instructions (bitwise, `bitselect`, plain load/store) appear on every integer lane namespace and mask — no bare `v128` type in the public API. Every v128 view retypes into any other via zero-cost `cast` (the universal bridge; there is no wasm instruction to select). Floats keep the scalar discipline: no bitwise ops without casting to an integer view |
 | Diagnostics | `new Module({ debug: true })` captures creation stack traces for emit-time errors |
-| Types | Plain JS with JSDoc annotations |
+| Types | Plain JS with JSDoc annotations; `index.d.ts` is generated from the veneer registry (`npm run types` — tsc can't see the dynamically attached constructors), typed end-to-end: param tuples infer body-callback `Var`s, operand slots accept exactly the safe promotions, masks/shapes are barriers in TS too |
 | Testing | Round-trip: instantiate output with V8 (`node --test`), assert executed results |
 
 ## Public API sketch
@@ -384,6 +384,10 @@ builder callbacks ──► CFG of basic blocks (typed instructions, virtual loc
 ```
 
 - Locals are non-SSA virtual registers in the CFG; liveness drives slot sharing.
+- Two encoder peepholes: `set s; get s` (same slot) collapses to `local.tee`,
+  and a synthetic zero-init in the straight-line entry prefix is elided when
+  its slot is provably fresh (wasm zero-initializes locals; loop-body inits
+  and params are never touched).
 - Relooper follows the dominator-tree approach of Ramsey's *Beyond Relooper*
   (as used in wasm-tools); a pre-pass lowers irreducible graphs by node
   splitting, falling back to a selector + `br_table` dispatch loop once
