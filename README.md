@@ -57,7 +57,7 @@ loads/stores, mem.size/grow/fill/copy, active and passive data segments
 with mem.init/seg.drop), start function, `T.select`, `$.switch`, `$.unreachable`, debug-mode creation traces.
 
 Not yet (see the deferred list in DESIGN.md — API to be designed first):
-tables/`call_indirect`, reference types, SIMD, custom sections. Irreducible control flow is detected and
+tables/`call_indirect`, reference types, SIMD. Irreducible control flow is detected and
 rejected rather than lowered.
 
 ## Development

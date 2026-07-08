@@ -307,10 +307,16 @@ may assume a shape for these beyond what's noted here.
   `ref.func` / `ref.null` / `ref.is_null`, typed `select` for references.
 - **SIMD (`v128`)** — in the Wasm 2.0 spec but explicitly descoped; the opcode
   table absorbs it later without design changes.
-- **Custom sections** — name section emission (possibly tied to `debug`),
-  raw `mod.customSection(name, bytes)` passthrough, `.name()` attribute.
 - Already out of spec scope (no design needed yet): GC types, exception
   handling, threads/atomics, tail calls, multi-memory, memory64.
+
+## Pinned — might revisit later
+
+Deemed unnecessary for now; not queued, not planned. Reopen only if a
+concrete need appears.
+
+- **Custom sections** — name section emission (possibly tied to `debug`),
+  raw `mod.customSection(name, bytes)` passthrough, `.name()` attribute.
 
 ## Compilation pipeline
 
