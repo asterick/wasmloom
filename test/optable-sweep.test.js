@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, s64, u64, f32, f64 } from "../src/index.js";
+import { Module, s32, u32, s64, u64, f32, f64, bool } from "../src/index.js";
 import { OPTABLE } from "../src/optable.js";
 import { VENEER_OPS } from "../src/expr.js";
 
@@ -10,7 +10,7 @@ import { VENEER_OPS } from "../src/expr.js";
 // expected traps. This catches wrong opcode bytes, swapped operands, wrong
 // signatures, AND wrong signedness-variant selection.
 
-const NS = { s32, u32, s64, u64, f32, f64 };
+const NS = { s32, u32, s64, u64, f32, f64, bool };
 const TRAP = Symbol("trap");
 const F = Math.fround;
 const U32 = (x) => x >>> 0;
@@ -258,6 +258,7 @@ const REFS = {
 // NaN payload bits are not portably observable across the JS boundary, and
 // NaN's sign bit is unspecified for host-supplied NaN — skip those few cases.
 REFS["select.select"] = (cond, a, c) => (cond !== 0 ? a : c);
+REFS["bool.of"] = (x) => (typeof x === "bigint" ? (x !== 0n ? 1 : 0) : (x !== 0 ? 1 : 0));
 REFS["f32.select"] = (cond, a, c) => F(cond !== 0 ? a : c);
 
 const SKIP = {

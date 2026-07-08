@@ -20,6 +20,7 @@ toolchain; emits binary `.wasm` bytes directly.
 | IR | CFG of basic blocks from day one; relooper reconstructs structure at emit |
 | Variables | One concept: `mod.variable()` / `$.variable()` — owner decides global vs local. The handle *is* a value expression; writes are `handle.set(v)` |
 | Integer types | Signedness is first-class: `s32`/`u32`/`s64`/`u64` (lowering to wasm i32/i64); floats `f32`/`f64` |
+| Booleans | `bool` is first-class (storage i32, values provably 0/1): comparisons/`eqz` produce it, conditions require it, `bool.of(x)` tests integers, `s32.cast`/`u32.cast` bridge out at zero cost |
 | Op naming | Suffix-less names select the `.wat` variant by namespace (`u32.div` emits `i32.div_u`); conversions are operand-driven (`f64.convert(x)` picks by x's type); `t.cast(x)` retypes across signedness at zero cost |
 | Zero-result ops | Auto-anchor as statements at their creation point (`u32.store(...)` is a statement) |
 | 64-bit immediates | BigInt always; plain numbers only when `Number.isSafeInteger`, else throw |
@@ -191,9 +192,16 @@ of blocks — conditional values are written to locals in each arm, or use
   from x's type; likewise `trunc`/`trunc_sat`/`extend`/`wrap`/`reinterpret`/
   `demote`/`promote`. Mixing signedness is an eager error; `u32.cast(x)` /
   `s32.cast(x)` (and 64-bit twins) retype across signedness at zero cost.
-- Comparisons and `eqz` produce `s32` (wasm's 0/1). Conditions (`$.if`,
-  `$.gotoIf`, `$.while`, `select`), `$.switch` indices, and memory addresses
-  accept either 32-bit signedness — those positions are sign-agnostic in wasm.
+- **`bool` is the truth type** (storage i32, values provably 0/1).
+  Comparisons and `eqz` produce `bool`; conditions (`$.if`, `$.gotoIf`,
+  `$.while`, `select`) require it — an integer condition is an eager error,
+  with `bool.of(x)` ("x ≠ 0", any integer type) as the explicit truthiness
+  test. The namespace carries `and`/`or`/`xor`/`not` (values — both sides
+  always evaluate, like `select`), `bool.const(true|false)` (JS booleans
+  only), and `bool.select`. `s32.cast(b)`/`u32.cast(b)` bridge out at zero
+  cost (sound: values are 0/1); there is deliberately no int → bool cast.
+  `$.switch` indices and memory addresses accept either 32-bit signedness
+  (indices, not truth values) but never `bool`.
 - **`T.select(cond, ifTrue, ifFalse)`** — branchless ternary, typed by
   namespace, condition-first like `cond ? a : b`. Both arms are **always
   evaluated** (that's the point: no branch); use `$.if` when an arm has

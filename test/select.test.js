@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, s64, f64, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, s64, f64, bool, WasmEmitError } from "../src/index.js";
 
 const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmEmitError && re.test(e.message));
 
@@ -29,10 +29,10 @@ test("select as branchless max/min", async () => {
   assert.equal(exports.fmax(2.5, 1.5), 2.5);
 });
 
-test("select works on s64 and accepts either condition signedness", async () => {
+test("select works on s64 with a bool-typed condition parameter", async () => {
   const mod = new Module();
-  mod.function([u32, s64, s64], [s64]).export("pick").body((c, a, b, $) => {
-    $.return(s64.select(c, a, b)); // u32 condition
+  mod.function([bool, s64, s64], [s64]).export("pick").body((c, a, b, $) => {
+    $.return(s64.select(c, a, b)); // c is a bool param
   });
   const { exports } = await instantiate(mod);
   assert.equal(exports.pick(1, 10n, 20n), 10n);
@@ -44,7 +44,7 @@ test("select evaluates BOTH arms (not short-circuiting)", async () => {
   const probeA = mod.function([], [s32]).import("env", "a");
   const probeB = mod.function([], [s32]).import("env", "b");
   mod.function([s32], [s32]).export("f").body((c, $) => {
-    $.return(s32.select(c, probeA.call(), probeB.call()));
+    $.return(s32.select(bool.of(c), probeA.call(), probeB.call()));
   });
   const calls = [];
   const { exports } = await instantiate(mod, {
@@ -54,11 +54,11 @@ test("select evaluates BOTH arms (not short-circuiting)", async () => {
   assert.deepEqual(calls, ["a", "b"]); // both ran, in operand order
 });
 
-test("select arms must match the namespace type", () => {
+test("select arms must match the namespace; condition must be bool", () => {
   const mod = new Module();
   mod.function([s32, u32], []).body((a, b, $) => {
-    throws(() => s32.select(a, a, b), /second arm: expected s32, got u32/);
-    throws(() => f64.select(a, a, a), /first arm: expected f64, got s32/);
-    throws(() => s32.select(s64.extend(a), a, a), /condition: expected a 32-bit integer.*got s64/);
+    throws(() => s32.select(s32.eqz(a), a, b), /second arm: expected s32, got u32/);
+    throws(() => f64.select(s32.eqz(a), a, a), /first arm: expected f64, got s32/);
+    throws(() => s32.select(a, a, a), /condition: expected bool.*got s32/);
   });
 });

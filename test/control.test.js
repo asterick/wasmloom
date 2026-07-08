@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32 } from "../src/index.js";
+import { Module, s32, bool } from "../src/index.js";
 
 async function instantiate(mod, imports = {}) {
   const bytes = mod.emit();
@@ -165,7 +165,7 @@ test("goto skipping forward over code", async () => {
   const mod = new Module();
   mod.function([s32], [s32]).export("f").body((x, $) => {
     const skip = $.label.ahead();
-    $.gotoIf(x, skip);
+    $.gotoIf(bool.of(x), skip);
     $.return(s32.const(11));
     skip.here();
     $.return(s32.const(22));
@@ -191,7 +191,7 @@ test("irreducible control flow is detected and rejected", () => {
   mod.function([s32], [s32]).export("f").body((x, $) => {
     const a = $.label.ahead();
     const b = $.label.ahead();
-    $.gotoIf(x, b);
+    $.gotoIf(bool.of(x), b);
     a.here();
     x.set(s32.add(x, s32.const(1)));
     b.here();
@@ -206,7 +206,7 @@ test("collatz: loops, chains, and calls combined", async () => {
   mod.function([s32], [s32]).export("collatz").body((n, $) => {
     const steps = $.variable(s32);
     $.while(s32.gt(n, s32.const(1)), ($) => {
-      $.if(s32.and(n, s32.const(1)), ($) => {
+      $.if(bool.of(s32.and(n, s32.const(1))), ($) => {
         n.set(s32.add(s32.mul(n, s32.const(3)), s32.const(1)));
       }).else(($) => {
         n.set(s32.div(n, s32.const(2)));

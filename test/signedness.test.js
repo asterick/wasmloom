@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, s64, u64, f32, f64, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, s64, u64, f32, f64, bool, WasmEmitError } from "../src/index.js";
 
 const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmEmitError && re.test(e.message));
 
@@ -25,10 +25,10 @@ test("the namespace selects the signedness variant", async () => {
   mod.function([u32], [u32]).export("ushr").body((a, $) => {
     $.return(u32.shr(a, u32.const(1)));
   });
-  mod.function([s32], [s32]).export("sneg").body((a, $) => {
+  mod.function([s32], [bool]).export("sneg").body((a, $) => {
     $.return(s32.lt(a, s32.const(0)));
   });
-  mod.function([u32], [s32]).export("uneg").body((a, $) => {
+  mod.function([u32], [bool]).export("uneg").body((a, $) => {
     $.return(u32.lt(a, u32.const(0)));
   });
   const { exports } = await instantiate(mod);
@@ -45,7 +45,7 @@ test("mixed signedness is an eager error; cast is the explicit bridge", async ()
   mod.function([s32, u32], [u32]).export("f").body((a, b, $) => {
     throws(() => s32.add(a, b), /expected s32, got u32/);
     throws(() => u32.add(a, b), /expected u32, got s32/);
-    throws(() => u32.cast(b), /expected s32, got u32/); // already u32
+    throws(() => u32.cast(b), /expected s32 or bool, got u32/); // already u32
     throws(() => s64.cast(a), /expected u64, got s32/); // width mismatch
     $.return(u32.add(u32.cast(a), b));
   });
@@ -106,25 +106,25 @@ test("wrap accepts either 64-bit signedness", async () => {
   assert.equal(exports.wu(0x1_0000_0001n), 1);
 });
 
-test("comparisons produce s32 regardless of operand namespace", async () => {
+test("comparisons produce bool; cast bridges to integer arithmetic", async () => {
   const mod = new Module();
   mod.function([u32, u32], [s32]).export("f").body((a, b, $) => {
-    // u32 comparison result feeds s32 arithmetic without a cast
-    $.return(s32.add(u32.lt(a, b), u32.gt(a, b)));
+    // bool results must be cast before feeding arithmetic
+    $.return(s32.add(s32.cast(u32.lt(a, b)), s32.cast(u32.gt(a, b))));
   });
   const { exports } = await instantiate(mod);
   assert.equal(exports.f(1, 2), 1);
   assert.equal(exports.f(2, 2), 0);
 });
 
-test("conditions and addresses accept either 32-bit signedness", async () => {
+test("addresses accept either signedness; conditions require bool", async () => {
   const mod = new Module();
   const mem = mod.memory({ min: 1 });
   mod.function([u32], [s32]).export("f").body((x, $) => {
     const r = $.variable(s32);
     u32.store(mem, x, x); // u32 address
-    $.if(x, ($) => {
-      // u32 condition
+    $.if(bool.of(x), ($) => {
+      // truthiness is explicit
       r.set(s32.const(1));
     });
     $.return(r);
@@ -134,11 +134,12 @@ test("conditions and addresses accept either 32-bit signedness", async () => {
   assert.equal(exports.f(0), 0);
 });
 
-test("s64/u64 conditions are rejected (wasm conditions are 32-bit)", () => {
+test("integer conditions are rejected — bool only", () => {
   const mod = new Module();
-  mod.function([s64], []).body((x, $) => {
-    throws(() => $.if(x, () => {}), /expected a 32-bit integer.*got s64/);
-    $.drop(s64.eqz(x)); // the explicit spelling — eqz/comparisons produce s32
+  mod.function([s32, s64], []).body((x, y, $) => {
+    throws(() => $.if(x, () => {}), /expected bool.*got s32/);
+    throws(() => $.while(y, () => {}), /expected bool.*got s64/);
+    $.drop(s32.cast(s64.eqz(y))); // eqz produces bool; bool.of(y) is the idiom
   });
 });
 

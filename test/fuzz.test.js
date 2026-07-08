@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, bool, WasmEmitError } from "../src/index.js";
 
 // Differential fuzzing of the relooper/liveness pipeline: generate random
 // label/goto/branch/switch programs, run them through a trivial JS
@@ -66,7 +66,7 @@ function build(blocks) {
       const t = blk.term;
       if (t.kind === "jump") $.goto(labels[t.to]);
       else if (t.kind === "branch") {
-        $.gotoIf(s32.and(x, s32.const(1)), labels[t.t]);
+        $.gotoIf(bool.of(s32.and(x, s32.const(1))), labels[t.t]);
         $.goto(labels[t.f]);
       } else if (t.kind === "switch") {
         $.switch(

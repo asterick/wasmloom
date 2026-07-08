@@ -1,6 +1,6 @@
 import { fail } from "./errors.js";
 import { OPTABLE } from "./optable.js";
-import { i32 as I32, f32, f64, s32, u32, s64, u64 } from "./types.js";
+import { i32 as I32, i64 as I64, f32, f64, s32, u32, s64, u64, bool } from "./types.js";
 import { makeNode, resolveOperand } from "./node.js";
 import { requireBuilder } from "./context.js";
 
@@ -30,8 +30,17 @@ const U32_MAX = 0xffffffff;
 /** Any 32-bit integer (s32 or u32) — used where wasm is sign-agnostic by position. */
 export function resolveInt32(x, what) {
   const v = resolveOperand(x, null, what);
-  if (v.type.wasmType !== I32) {
+  if (v.type.wasmType !== I32 || v.type === bool) {
     fail(`${what}: expected a 32-bit integer (s32 or u32), got ${v.type.name}`);
+  }
+  return v;
+}
+
+/** Conditions are strictly bool — comparisons produce it; bool.of(x) tests integers. */
+export function resolveBool(x, what) {
+  const v = resolveOperand(x, null, what);
+  if (v.type !== bool) {
+    fail(`${what}: expected bool (comparisons produce bool; use bool.of(x) to test an integer), got ${v.type.name}`);
   }
   return v;
 }
@@ -77,20 +86,31 @@ f64.const = function (v) {
   return makeNode("const", { type: f64, results: [f64], value: v });
 };
 
+bool.const = function (v) {
+  if (typeof v !== "boolean") {
+    fail(`bool.const: expected true or false, got ${typeof v === "number" ? v : typeof v}`);
+  }
+  return makeNode("const", { type: bool, results: [bool], value: v ? 1 : 0 });
+};
+
 // --- casts (zero-cost retype between signednesses of the same width) ----------
 
-function defCast(target, from) {
+function defCast(target, froms) {
   target.cast = function (x) {
     const what = `${target.name}.cast`;
     const v = resolveOperand(x, null, what);
-    if (v.type !== from) fail(`${what}: expected ${from.name}, got ${v.type.name}`);
+    if (!froms.includes(v.type)) {
+      fail(`${what}: expected ${froms.map((f) => f.name).join(" or ")}, got ${v.type.name}`);
+    }
     return makeNode("cast", { type: target, results: [target], operands: [v], display: what });
   };
 }
-defCast(s32, u32);
-defCast(u32, s32);
-defCast(s64, u64);
-defCast(u64, s64);
+// bool → s32/u32 is sound for free (values are provably 0/1); there is no
+// int → bool cast — use bool.of(x) or a comparison.
+defCast(s32, [u32, bool]);
+defCast(u32, [s32, bool]);
+defCast(s64, [u64]);
+defCast(u64, [s64]);
 
 // --- constructor generation ----------------------------------------------------
 
@@ -186,13 +206,13 @@ function buildIntNamespace(T, st, signed) {
     defOp(T, name, e(name), [T, T], [T]);
   }
   for (const name of ["clz", "ctz", "popcnt"]) defOp(T, name, e(name), [T], [T]);
-  defOp(T, "eqz", e("eqz"), [T], [s32]);
-  defOp(T, "eq", e("eq"), [T, T], [s32]);
-  defOp(T, "ne", e("ne"), [T, T], [s32]);
+  defOp(T, "eqz", e("eqz"), [T], [bool]);
+  defOp(T, "eq", e("eq"), [T, T], [bool]);
+  defOp(T, "ne", e("ne"), [T, T], [bool]);
 
   // Signedness-selected (the suffix comes from the namespace)
   for (const name of ["div", "rem", "shr"]) defOp(T, name, e(name + sfx), [T, T], [T]);
-  for (const name of ["lt", "gt", "le", "ge"]) defOp(T, name, e(name + sfx), [T, T], [s32]);
+  for (const name of ["lt", "gt", "le", "ge"]) defOp(T, name, e(name + sfx), [T, T], [bool]);
 
   // In-place sign extension is inherently signed
   if (signed) {
@@ -261,7 +281,7 @@ function buildFloatNamespace(T, st) {
     defOp(T, name, e(name), [T, T], [T]);
   }
   for (const name of ["eq", "ne", "lt", "gt", "le", "ge"]) {
-    defOp(T, name, e(name), [T, T], [s32]);
+    defOp(T, name, e(name), [T, T], [bool]);
   }
   defOp(T, "load", e("load"), [ANY32], [T]);
   defOp(T, "store", e("store"), [ANY32, T], []);
@@ -291,6 +311,29 @@ function buildFloatNamespace(T, st) {
 buildFloatNamespace(f32, "f32");
 buildFloatNamespace(f64, "f64");
 
+// --- bool: logic over 0/1, strict conditions ----------------------------------
+// Like select, these are values: NOT short-circuiting — both sides always
+// evaluate. Use $.if for guarded evaluation.
+
+defOp(bool, "and", entryOf("i32.and"), [bool, bool], [bool]);
+defOp(bool, "or", entryOf("i32.or"), [bool, bool], [bool]);
+defOp(bool, "xor", entryOf("i32.xor"), [bool, bool], [bool]);
+defOp(bool, "not", entryOf("i32.eqz"), [bool], [bool]);
+
+/** Truthiness: bool.of(x) means "x ≠ 0" for any integer type. */
+bool.of = function (x) {
+  const v = resolveOperand(x, null, "bool.of");
+  if (v.type === bool || (v.type.wasmType !== I32 && v.type.wasmType !== I64)) {
+    fail(`bool.of: expected an integer (s32/u32/s64/u64), got ${v.type.name}`);
+  }
+  const eqzEntry = entryOf(v.type.wasmType === I32 ? "i32.eqz" : "i64.eqz");
+  const isZero = makeNode("op", { results: [bool], entry: eqzEntry, operands: [v], display: "bool.of" });
+  return makeNode("op", { results: [bool], entry: entryOf("i32.eqz"), operands: [isZero], display: "bool.of" });
+};
+for (const [from, key] of [[s32, "i32.eqz"], [u32, "i32.eqz"], [s64, "i64.eqz"], [u64, "i64.eqz"]]) {
+  VENEER_OPS.push({ ns: "bool", name: "of", params: [from], results: [bool], entry: entryOf(key) });
+}
+
 // --- select: branchless ternary, typed by namespace ---------------------------
 // NOTE: both arms are ALWAYS evaluated (select is not short-circuiting — that's
 // its point: no branch). Use $.if when an arm has effects that must be guarded.
@@ -300,16 +343,16 @@ const SELECT_ENTRY = entryOf("select.select");
 function defSelect(T) {
   const display = `${T.name}.select`;
   T.select = function (cond, ifTrue, ifFalse) {
-    const c = resolveInt32(cond, `${display} condition`);
+    const c = resolveBool(cond, `${display} condition`);
     const a = resolveOperand(ifTrue, T, `${display} first arm`);
     const b = resolveOperand(ifFalse, T, `${display} second arm`);
     // wasm stack order: val1, val2, cond
     return makeNode("op", { results: [T], entry: SELECT_ENTRY, operands: [a, b, c], display });
   };
   // params in constructor order (cond first) for the sweep
-  VENEER_OPS.push({ ns: T.name, name: "select", params: [s32, T, T], results: [T], entry: SELECT_ENTRY });
+  VENEER_OPS.push({ ns: T.name, name: "select", params: [bool, T, T], results: [T], entry: SELECT_ENTRY });
 }
-for (const T of [s32, u32, s64, u64, f32, f64]) defSelect(T);
+for (const T of [bool, s32, u32, s64, u64, f32, f64]) defSelect(T);
 
 // --- bulk memory operations (surfaced as methods on the memory/data handles) --
 
@@ -394,4 +437,4 @@ for (const [ns, name, params, results] of [
   VENEER_OPS.push({ ns, name, params, results, entry: entryOf(`${ns}.${name}`), mem: "bulk" });
 }
 
-export { s32, u32, s64, u64, f32, f64 };
+export { s32, u32, s64, u64, f32, f64, bool };

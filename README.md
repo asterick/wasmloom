@@ -41,7 +41,9 @@ Signedness is first-class: `s32`/`u32`/`s64`/`u64` select the right wasm
 instruction variant (`u32.div` emits `i32.div_u`), conversions dispatch on
 their operand's type (`f64.convert(x)`), and `u32.cast(x)`/`s32.cast(x)`
 retype across signedness at zero cost. Mixed-sign arithmetic is an eager
-build error.
+build error. Truth is first-class too: comparisons produce `bool`,
+conditions require it (`bool.of(x)` tests integers), and `bool` carries
+`and`/`or`/`xor`/`not`.
 
 Working: functions (declare/body/import/export, forward decls, mutual
 recursion), the full Wasm 2.0 numeric instruction set, module and function

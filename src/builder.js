@@ -1,6 +1,6 @@
 import { fail } from "./errors.js";
 import { checkValType } from "./types.js";
-import { resolveInt32 } from "./expr.js";
+import { resolveInt32, resolveBool } from "./expr.js";
 import { Block, Label, successors } from "./cfg.js";
 import { makeNode, resolveOperand, describeNode } from "./node.js";
 import { Variable } from "./variable.js";
@@ -165,7 +165,7 @@ class IfChain {
   }
 
   _branchInto(cond, what) {
-    const c = resolveInt32(cond, `${what} condition`);
+    const c = resolveBool(cond, `${what} condition`);
     const thenBlock = this.b.newBlock();
     const elseBlock = this.b.newBlock();
     c.consumers.push({ block: this.b.current });
@@ -243,7 +243,7 @@ function makeDollar(b) {
       b.flush();
       const l = b.checkLabel(target, "$.gotoIf");
       l.referenced = true;
-      const c = resolveInt32(cond, "$.gotoIf condition");
+      const c = resolveBool(cond, "$.gotoIf condition");
       c.consumers.push({ block: b.current });
       const fallthrough = b.newBlock();
       b.current.term = { kind: "branch", cond: c, ifTrue: l.block, ifFalse: fallthrough };
@@ -308,7 +308,7 @@ function makeDollar(b) {
       const exit = b.newBlock();
       b.terminate({ kind: "jump", target: top });
       b.current = top;
-      const c = resolveInt32(cond, "$.while condition");
+      const c = resolveBool(cond, "$.while condition");
       c.consumers.push({ block: top });
       top.term = { kind: "branch", cond: c, ifTrue: body, ifFalse: exit };
       b.current = body;
@@ -324,6 +324,8 @@ function makeDollar(b) {
 }
 
 function wrapInit(type, init) {
-  if (typeof init === "number" || typeof init === "bigint") return type.const(init);
+  if (typeof init === "number" || typeof init === "bigint" || typeof init === "boolean") {
+    return type.const(init);
+  }
   return init;
 }

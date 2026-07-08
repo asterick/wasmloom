@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, s64, u64, f32, f64, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, s64, u64, f32, f64, bool, WasmEmitError } from "../src/index.js";
 
 const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmEmitError && re.test(e.message));
 
@@ -151,16 +151,16 @@ test("expressions require an active body", () => {
 test("elseIf after an intervening statement", () => {
   const mod = new Module();
   mod.function([s32], []).body((x, $) => {
-    const chain = $.if(x, () => {});
+    const chain = $.if(bool.of(x), () => {});
     $.drop(s32.const(1));
-    throws(() => chain.elseIf(x, () => {}), /finalized by an intervening statement/);
+    throws(() => chain.elseIf(bool.of(x), () => {}), /finalized by an intervening statement/);
   });
 });
 
 test("else called twice", () => {
   const mod = new Module();
   mod.function([s32], []).body((x, $) => {
-    const chain = $.if(x, () => {});
+    const chain = $.if(bool.of(x), () => {});
     chain.else(() => {});
     throws(() => chain.else(() => {}), /already has an \.else/);
   });
@@ -183,7 +183,7 @@ test("non-dominating multi-use is rejected at emit", () => {
   const next = mod.function([], [s32]).import("env", "next");
   mod.function([s32], [s32]).export("f").body((c, $) => {
     let x;
-    $.if(c, () => { x = next.call(); $.drop(x); });
+    $.if(bool.of(c), () => { x = next.call(); $.drop(x); });
     $.return(x); // second use outside the arm that created it
   });
   throws(() => mod.emit(), /does not dominate all uses/);

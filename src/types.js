@@ -36,6 +36,7 @@ export const s32 = new ValType("s32", 0x7f, 0, i32);
 export const u32 = new ValType("u32", 0x7f, 0, i32);
 export const s64 = new ValType("s64", 0x7e, 0n, i64);
 export const u64 = new ValType("u64", 0x7e, 0n, i64);
+export const bool = new ValType("bool", 0x7f, false, i32);
 
 /** Storage types in canonical local-pool order. */
 export const valtypes = [i32, i64, f32, f64];
@@ -43,7 +44,7 @@ export const valtypes = [i32, i64, f32, f64];
 /** @returns {ValType} */
 export function checkValType(x, what) {
   if (!(x instanceof ValType) || x === i32 || x === i64) {
-    fail(`${what}: expected a value type (s32, u32, s64, u64, f32, f64), got ${describe(x)}`);
+    fail(`${what}: expected a value type (s32, u32, s64, u64, f32, f64, bool), got ${describe(x)}`);
   }
   return x;
 }

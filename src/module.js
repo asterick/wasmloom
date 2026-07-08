@@ -295,7 +295,7 @@ export class Module {
  */
 function resolveModuleInit(type, init) {
   if (init === undefined) return { kind: "const", node: type.const(type.zero) };
-  if (typeof init === "number" || typeof init === "bigint") {
+  if (typeof init === "number" || typeof init === "bigint" || typeof init === "boolean") {
     return { kind: "const", node: type.const(init) };
   }
   if (init instanceof Node) {
