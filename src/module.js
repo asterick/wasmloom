@@ -31,6 +31,12 @@ export class FunctionHandle {
     if (this.importInfo) fail(`function ${this.debugName()}: an imported function cannot have a body`);
     if (this.builderData) fail(`function ${this.debugName()}: body is already defined`);
     if (typeof cb !== "function") fail(".body(): expected a callback");
+    if (cb.length > this.params.length + 1) {
+      fail(
+        `function ${this.debugName()}: body callback declares ${cb.length} parameters, ` +
+        `but the function has only ${this.params.length} param(s) plus $`,
+      );
+    }
     const b = new FunctionBuilder(this.module, this);
     const paramHandles = this.params.map(
       (t) => new Variable("function", t, { builder: b, vlocal: b.newVLocal(t, "param"), isParam: true }),

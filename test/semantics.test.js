@@ -113,3 +113,67 @@ function countLocals(bytes) {
   }
   throw new Error("no code section found");
 }
+
+test("single-use call evaluates at consumption, after later statements (pinned)", async () => {
+  // DESIGN.md rule 1: a single-use expression inlines at its point of
+  // consumption — even past intervening statements. This pins the documented
+  // reordering so it can never silently change.
+  const mod = new Module();
+  const probe = mod.function([], [i32]).import("env", "probe");
+  const mark = mod.function([], []).import("env", "mark");
+  mod.function([], [i32]).export("f").body(($) => {
+    const a = probe.call(); // single-use: created here...
+    mark.call(); // ...but this statement runs first
+    $.return(a);
+  });
+  const log = [];
+  const { instance } = await WebAssembly.instantiate(mod.emit(), {
+    env: { probe: () => (log.push("probe"), 7), mark: () => log.push("mark") },
+  });
+  assert.equal(instance.exports.f(), 7);
+  assert.deepEqual(log, ["mark", "probe"]);
+});
+
+test("nested multi-use expressions materialize once each", async () => {
+  const mod = new Module();
+  const probe = mod.function([], [i32]).import("env", "probe");
+  mod.function([], [i32]).export("f").body(($) => {
+    const x = probe.call(); // multi-use
+    const y = i32.add(x, x); // itself multi-use
+    $.return(i32.add(y, y));
+  });
+  let calls = 0;
+  const { instance } = await WebAssembly.instantiate(mod.emit(), {
+    env: { probe: () => (calls++, 7) },
+  });
+  assert.equal(instance.exports.f(), 28);
+  assert.equal(calls, 1);
+});
+
+test("spilled tuple handles can be read many times", async () => {
+  const mod = new Module();
+  const divmod = mod.function([i32, i32], [i32, i32]).body((a, b, $) => {
+    $.return(i32.div_u(a, b), i32.rem_u(a, b));
+  });
+  mod.function([i32, i32], [i32]).export("f").body((a, b, $) => {
+    const [q, r] = divmod.call(a, b);
+    $.return(i32.add(i32.add(q, q), i32.add(r, r)));
+  });
+  const { instance } = await WebAssembly.instantiate(mod.emit());
+  assert.equal(instance.exports.f(17, 5), 2 * 3 + 2 * 2);
+});
+
+test("statements after $.return are unreachable and pruned", async () => {
+  const mod = new Module();
+  const log = mod.function([i32], []).import("env", "log");
+  mod.function([], [i32]).export("f").body(($) => {
+    $.return(i32.const(1));
+    log.call(i32.const(999)); // dead code: recorded, then pruned
+  });
+  const seen = [];
+  const { instance } = await WebAssembly.instantiate(mod.emit(), {
+    env: { log: (v) => seen.push(v) },
+  });
+  assert.equal(instance.exports.f(), 1);
+  assert.deepEqual(seen, []);
+});

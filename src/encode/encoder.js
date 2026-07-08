@@ -68,8 +68,10 @@ export function encodeModule(module) {
     f.typeIndex = internType(f.params, f.results);
   }
 
-  // Compile all defined bodies before writing anything.
-  const bodies = definedFns.map((f) => compileFunction(f));
+  // Compile all defined bodies before writing anything. Compilation mutates
+  // per-node state (temp assignment), so it runs once per function and is
+  // cached — emit() must be repeatable and byte-stable.
+  const bodies = definedFns.map((f) => (f.compiled ??= compileFunction(f)));
 
   const w = new ByteWriter();
   w.bytes([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);

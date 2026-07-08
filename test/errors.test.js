@@ -197,3 +197,66 @@ test("debug mode includes creation site in errors", () => {
     assert.match(e.message, /errors\.test\.js/);
   }
 });
+
+test("memory align/offset validation", () => {
+  const mod = new Module();
+  const mem = mod.memory({ min: 1 });
+  mod.function([i32], []).body((addr, $) => {
+    throws(() => i32.load(mem, addr, { align: 3 }), /power of two/);
+    throws(() => i32.load(mem, addr, { align: 8 }), /power of two ≤ 4/);
+    throws(() => i64.load(mem, addr, { align: 16 }), /power of two ≤ 8/);
+    throws(() => i32.load(mem, addr, { offset: -1 }), /offset/);
+    throws(() => i32.load(mem, addr, { offset: 2 ** 32 }), /offset/);
+    i32.store(mem, addr, i32.load(mem, addr, { align: 1 })); // sub-natural align is legal
+  });
+});
+
+test("memory handle from another module is rejected", () => {
+  const modA = new Module();
+  const memA = modA.memory({ min: 1 });
+  const modB = new Module();
+  modB.function([i32], [i32]).body((addr, $) => {
+    throws(() => i32.load(memA, addr), /different module/);
+    $.return(addr);
+  });
+});
+
+test("calling a function from another module is rejected", () => {
+  const modA = new Module();
+  const fnA = modA.function([], []).import("env", "f");
+  const modB = new Module();
+  modB.function([], []).body(($) => {
+    throws(() => fnA.call(), /different module/);
+  });
+});
+
+test("start function must belong to the module", () => {
+  const modA = new Module();
+  const fnA = modA.function([], []).import("env", "f");
+  const modB = new Module();
+  throws(() => modB.start(fnA), /from this module/);
+});
+
+test("body callback declaring more parameters than the signature", () => {
+  const mod = new Module();
+  throws(
+    () => mod.function([i32], [i32]).body((a, b, $) => $.return(a)),
+    /declares 3 parameters.*1 param\(s\)/s,
+  );
+});
+
+test("unconsumed multi-value call result is an error", () => {
+  const mod = new Module();
+  const divmod = mod.function([i32, i32], [i32, i32]).import("env", "divmod");
+  throws(
+    () => mod.function([], []).body(($) => {
+      divmod.call(i32.const(7), i32.const(2)); // tuple ignored entirely
+    }),
+    /never used/,
+  );
+  // ...but consuming any element of the tuple is fine.
+  mod.function([], []).body(($) => {
+    const [q] = divmod.call(i32.const(7), i32.const(2));
+    $.drop(q);
+  });
+});

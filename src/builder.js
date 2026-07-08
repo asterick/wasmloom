@@ -109,10 +109,25 @@ export class FunctionBuilder {
         }
       }
     }
-    // Unconsumed effectful values: a call with results that nothing uses is an error.
+    // Unconsumed effectful values: a call whose result(s) nothing uses is an
+    // error. For multi-value calls, reading any element of the tuple counts.
+    const readVLocals = new Set();
     for (const node of this.nodes) {
-      if (node.kind === "call" && node.results.length > 0 && !node.spillTemps && node.consumers.length === 0) {
-        fail(`function ${this.handle.debugName()}: result of ${describeNode(node)} is never used — discard it explicitly with $.drop()`, node);
+      if (node.kind === "read" && node.variable.scope === "function") {
+        readVLocals.add(node.variable.vlocal);
+      }
+    }
+    for (const node of this.nodes) {
+      if (node.kind !== "call" || node.results.length === 0) continue;
+      const consumed = node.spillTemps
+        ? node.spillTemps.some((t) => readVLocals.has(t))
+        : node.consumers.length > 0;
+      if (!consumed) {
+        fail(
+          `function ${this.handle.debugName()}: result of ${describeNode(node)} is never used — ` +
+          `discard it explicitly with $.drop() (or destructure at least one element of a tuple)`,
+          node,
+        );
       }
     }
   }

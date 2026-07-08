@@ -149,3 +149,49 @@ test("declaration order is unconstrained (imports emitted first)", async () => {
   const { exports } = await instantiate(mod, { env: { ext: () => 10 } });
   assert.equal(exports.f(), 11);
 });
+
+test("an imported function can be the start function", async () => {
+  const mod = new Module();
+  const init = mod.function([], []).import("env", "init");
+  mod.start(init);
+  let ran = 0;
+  await instantiate(mod, { env: { init: () => ran++ } });
+  assert.equal(ran, 1);
+});
+
+test("f32.const rounds doubles to float32", async () => {
+  const mod = new Module();
+  const { f32 } = await import("../src/index.js");
+  mod.function([], [f32]).export("f").body(($) => {
+    $.return(f32.const(0.1));
+  });
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.f(), Math.fround(0.1));
+  assert.notEqual(exports.f(), 0.1);
+});
+
+test("i64 unsigned spellings read back as signed", async () => {
+  const mod = new Module();
+  mod.function([], [i64]).export("f").body(($) => {
+    $.return(i64.const(2n ** 64n - 1n));
+  });
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.f(), -1n);
+});
+
+test("load/store offsets are applied", async () => {
+  const mod = new Module();
+  const mem = mod.memory({ min: 1 }).export("memory");
+  mod.function([i32, i32], []).export("poke").body((addr, val, $) => {
+    i32.store(mem, addr, val, { offset: 65500 });
+  });
+  mod.function([i32], [i32]).export("peek").body((addr, $) => {
+    $.return(i32.load(mem, addr, { offset: 65500 }));
+  });
+  const { exports } = await instantiate(mod);
+  exports.poke(0, 777);
+  assert.equal(exports.peek(0), 777);
+  assert.equal(new DataView(exports.memory.buffer).getInt32(65500, true), 777);
+  // out-of-page-bounds traps
+  assert.throws(() => exports.poke(100, 1), WebAssembly.RuntimeError);
+});
