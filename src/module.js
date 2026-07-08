@@ -5,7 +5,7 @@ import { makeNode, resolveOperand, Node } from "./node.js";
 import { Variable } from "./variable.js";
 import { FunctionBuilder } from "./builder.js";
 import { encodeModule } from "./encode/encoder.js";
-import "./expr.js"; // ensure instruction constructors are attached to the type namespaces
+import { MEMORY_OPS } from "./expr.js";
 
 /** Handle for a declared function. Declare first; attach `.body()` or `.import()` later. */
 export class FunctionHandle {
@@ -105,6 +105,31 @@ export class MemoryHandle {
     this.index = -1;
   }
 
+  /** Current size in pages — a u32 expression. */
+  size() {
+    return MEMORY_OPS.size(this);
+  }
+
+  /** Grow by `delta` pages; u32 expression yielding the old size, or 2^32-1 on failure. */
+  grow(delta) {
+    return MEMORY_OPS.grow(this, delta);
+  }
+
+  /** Fill `len` bytes at `dst` with the byte `value`. Statement. */
+  fill(dst, value, len) {
+    MEMORY_OPS.fill(this, dst, value, len);
+  }
+
+  /** Copy `len` bytes from `src` to `dst` within this memory. Statement. */
+  copy(dst, src, len) {
+    MEMORY_OPS.copy(this, dst, src, len);
+  }
+
+  /** Copy `len` bytes from a passive data segment (at `src`) to `dst`. Statement. */
+  init(seg, dst, src, len) {
+    MEMORY_OPS.init(this, seg, dst, src, len);
+  }
+
   import(moduleName, name) {
     if (this.importInfo) fail(".import(): memory is already imported");
     if (typeof moduleName !== "string" || typeof name !== "string") {
@@ -119,6 +144,51 @@ export class MemoryHandle {
     this.exportName ??= name;
     return this;
   }
+}
+
+/**
+ * A data segment. Passive by default (copied at runtime via `mem.init`);
+ * chaining `.at(mem, offset)` makes it active (copied at instantiation).
+ */
+export class DataSegment {
+  constructor(module, bytes) {
+    this.handleKind = "data";
+    this.module = module;
+    this.bytes = bytes;
+    this.active = null; // { mem, offset: {kind: 'int'|'const'|'global', ...} }
+    this.index = -1;
+  }
+
+  /** Pin as active: copied into `mem` at `offset` when the module instantiates. */
+  at(mem, offset) {
+    if (this.active) fail(".at(): data segment is already active");
+    if (mem?.handleKind !== "memory" || mem.module !== this.module) {
+      fail(".at(): expected a memory handle from this module");
+    }
+    this.active = { mem, offset: resolveDataOffset(offset) };
+    return this;
+  }
+
+  /** data.drop — release the segment's contents at runtime. Statement. */
+  drop() {
+    MEMORY_OPS.dropData(this);
+  }
+}
+
+function resolveDataOffset(offset) {
+  if (typeof offset === "number") {
+    if (!Number.isInteger(offset) || offset < 0 || offset > 0xffffffff) {
+      fail(".at(): offset must be an integer in [0, 2^32)");
+    }
+    return { kind: "int", value: offset };
+  }
+  if (offset instanceof Node && offset.kind === "const" && offset.type.wasmType.name === "i32") {
+    return { kind: "const", node: offset };
+  }
+  if (offset?.handleKind === "variable" && offset.scope === "module" && offset.type.wasmType.name === "i32") {
+    return { kind: "global", variable: offset }; // must be imported immutable — checked at emit
+  }
+  fail(".at(): offset must be an integer, an s32/u32 const, or an imported immutable module variable");
 }
 
 function checkLimits(limits, what) {
@@ -144,6 +214,7 @@ export class Module {
     this.functions = [];
     this.variables = [];
     this.memories = [];
+    this.dataSegments = [];
     this.exports = [];
     this.exportNames = new Set();
     this.startFunction = null;
@@ -173,6 +244,21 @@ export class Module {
     if (this.memories.length > 0) fail("mod.memory: a module may declare at most one memory");
     const handle = new MemoryHandle(this, checkLimits(limits, "mod.memory"));
     this.memories.push(handle);
+    return handle;
+  }
+
+  /**
+   * Declare a data segment from raw bytes (copied now — later mutation of the
+   * source does not affect the module). Passive unless `.at(mem, offset)` chains.
+   * @param {Uint8Array|ArrayBuffer} bytes
+   */
+  data(bytes) {
+    let copy;
+    if (bytes instanceof Uint8Array) copy = bytes.slice();
+    else if (bytes instanceof ArrayBuffer) copy = new Uint8Array(bytes.slice(0));
+    else fail("mod.data: expected a Uint8Array or ArrayBuffer");
+    const handle = new DataSegment(this, copy);
+    this.dataSegments.push(handle);
     return handle;
   }
 

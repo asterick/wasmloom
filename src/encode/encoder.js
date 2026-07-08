@@ -17,6 +17,8 @@ const SECTION = {
   export: 7,
   start: 8,
   code: 10,
+  data: 11,
+  dataCount: 12,
 };
 
 const EXPORT_KIND = { func: 0, memory: 2, global: 3 };
@@ -40,6 +42,16 @@ export function encodeModule(module) {
   const importedGlobals = module.variables.filter((g) => g.importInfo);
   const definedGlobals = module.variables.filter((g) => !g.importInfo);
   [...importedGlobals, ...definedGlobals].forEach((g, i) => (g.index = i));
+
+  module.dataSegments.forEach((seg, i) => (seg.index = i));
+  for (const seg of module.dataSegments) {
+    if (seg.active?.offset.kind === "global") {
+      const ref = seg.active.offset.variable;
+      if (!ref.importInfo || ref.mutable) {
+        fail(".at(): an offset variable must be an imported immutable module variable");
+      }
+    }
+  }
 
   for (const g of module.variables) {
     if (!g.mutable && g.setCount > 0) {
@@ -138,12 +150,39 @@ export function encodeModule(module) {
     w.section(SECTION.start, (s) => s.u32(module.startFunction.index));
   }
 
+  // The data-count section must precede code so memory.init/data.drop validate.
+  if (module.dataSegments.length > 0) {
+    w.section(SECTION.dataCount, (s) => s.u32(module.dataSegments.length));
+  }
+
   w.section(SECTION.code, (s) => {
     if (bodies.length === 0) return;
     s.vec(bodies, (sw, body) => {
       const bw = new ByteWriter();
       writeBody(bw, body);
       sw.u32(bw.len).bytes(bw.toBytes());
+    });
+  });
+
+  w.section(SECTION.data, (s) => {
+    if (module.dataSegments.length === 0) return;
+    s.vec(module.dataSegments, (sw, seg) => {
+      if (seg.active) {
+        sw.u8(0x00);
+        const off = seg.active.offset;
+        if (off.kind === "int") {
+          const signed = off.value > 0x7fffffff ? off.value - 0x100000000 : off.value;
+          sw.u8(OPS.i32_const).s32(signed);
+        } else if (off.kind === "global") {
+          sw.u8(OPS.global_get).u32(off.variable.index);
+        } else {
+          writeConst(sw, off.node);
+        }
+        sw.u8(OPS.end);
+      } else {
+        sw.u8(0x01);
+      }
+      sw.u32(seg.bytes.length).bytes(seg.bytes);
     });
   });
 
@@ -231,7 +270,17 @@ function writeItem(w, item, slotOf) {
     case "gset": w.u8(OPS.global_set).u32(item.g.index); break;
     case "op":
       w.bytes(item.entry.op);
-      if (item.entry.mem) w.u32(item.memarg.align).u32(item.memarg.offset);
+      if (item.entry.mem) {
+        w.u32(item.memarg.align).u32(item.memarg.offset);
+      } else {
+        switch (item.entry.imm) {
+          case "mem": w.u32(0); break; // single memory: index 0
+          case "mem+mem": w.u32(0).u32(0); break;
+          case "data": w.u32(item.segment.index); break;
+          case "data+mem": w.u32(item.segment.index).u32(0); break;
+          default: break; // no immediates
+        }
+      }
       break;
     case "call": w.u8(OPS.call).u32(item.fn.index); break;
     case "drop": w.u8(OPS.drop); break;

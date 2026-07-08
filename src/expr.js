@@ -201,9 +201,18 @@ function buildIntNamespace(T, st, signed) {
     if (st === "i64") defOp(T, "extend32", e("extend32_s"), [T], [T]);
   }
 
-  // Memory (full-width; sized variants are deferred)
+  // Memory — extension signedness of sized loads comes from the type;
+  // stores are sign-agnostic and exist on both namespaces.
   defOp(T, "load", e("load"), [ANY32], [T]);
   defOp(T, "store", e("store"), [ANY32, T], []);
+  defOp(T, "load8", e(`load8${sfx}`), [ANY32], [T]);
+  defOp(T, "load16", e(`load16${sfx}`), [ANY32], [T]);
+  defOp(T, "store8", e("store8"), [ANY32, T], []);
+  defOp(T, "store16", e("store16"), [ANY32, T], []);
+  if (st === "i64") {
+    defOp(T, "load32", e(`load32${sfx}`), [ANY32], [T]);
+    defOp(T, "store32", e("store32"), [ANY32, T], []);
+  }
 
   // Conversions (operand-driven)
   if (st === "i32") {
@@ -281,5 +290,88 @@ function buildFloatNamespace(T, st) {
 
 buildFloatNamespace(f32, "f32");
 buildFloatNamespace(f64, "f64");
+
+// --- bulk memory operations (surfaced as methods on the memory/data handles) --
+
+function checkMemHandle(mem, what) {
+  const b = requireBuilder(what);
+  if (mem?.handleKind !== "memory") fail(`${what}: expected a memory handle`);
+  if (mem.module !== b.module) fail(`${what}: memory belongs to a different module`);
+  return b;
+}
+
+function checkSegHandle(seg, module, what) {
+  if (seg?.handleKind !== "data") fail(`${what}: expected a data segment handle`);
+  if (seg.module !== module) fail(`${what}: data segment belongs to a different module`);
+}
+
+const bulk = (name) => entryOf(`memory.${name}`);
+
+/** Implementations behind MemoryHandle/DataSegment methods (module.js delegates here). */
+export const MEMORY_OPS = {
+  size(mem) {
+    checkMemHandle(mem, "mem.size()");
+    return makeNode("op", { results: [u32], entry: bulk("size"), operands: [], mem, display: "mem.size()" });
+  },
+  grow(mem, delta) {
+    checkMemHandle(mem, "mem.grow()");
+    const d = resolveInt32(delta, "mem.grow() delta");
+    return makeNode("op", { results: [u32], entry: bulk("grow"), operands: [d], mem, display: "mem.grow()" });
+  },
+  fill(mem, dst, value, len) {
+    checkMemHandle(mem, "mem.fill()");
+    const operands = [
+      resolveInt32(dst, "mem.fill() destination"),
+      resolveInt32(value, "mem.fill() byte value"),
+      resolveInt32(len, "mem.fill() length"),
+    ];
+    makeNode("op", { results: [], entry: bulk("fill"), operands, mem, display: "mem.fill()" }, { anchor: true });
+  },
+  copy(mem, dst, src, len) {
+    checkMemHandle(mem, "mem.copy()");
+    const operands = [
+      resolveInt32(dst, "mem.copy() destination"),
+      resolveInt32(src, "mem.copy() source"),
+      resolveInt32(len, "mem.copy() length"),
+    ];
+    makeNode("op", { results: [], entry: bulk("copy"), operands, mem, display: "mem.copy()" }, { anchor: true });
+  },
+  init(mem, seg, dst, src, len) {
+    const b = checkMemHandle(mem, "mem.init()");
+    checkSegHandle(seg, b.module, "mem.init()");
+    const operands = [
+      resolveInt32(dst, "mem.init() destination"),
+      resolveInt32(src, "mem.init() source offset"),
+      resolveInt32(len, "mem.init() length"),
+    ];
+    makeNode(
+      "op",
+      { results: [], entry: bulk("init"), operands, mem, segment: seg, display: "mem.init()" },
+      { anchor: true },
+    );
+  },
+  dropData(seg) {
+    const b = requireBuilder("seg.drop()");
+    checkSegHandle(seg, b.module, "seg.drop()");
+    makeNode(
+      "op",
+      { results: [], entry: entryOf("data.drop"), operands: [], segment: seg, display: "seg.drop()" },
+      { anchor: true },
+    );
+  },
+};
+
+// Register the handle-method instructions for sweep coverage (mem: "bulk"
+// marks them as not directly constructible from a namespace).
+for (const [ns, name, params, results] of [
+  ["memory", "size", [], [u32]],
+  ["memory", "grow", [u32], [u32]],
+  ["memory", "fill", [u32, u32, u32], []],
+  ["memory", "copy", [u32, u32, u32], []],
+  ["memory", "init", [u32, u32, u32], []],
+  ["data", "drop", [], []],
+]) {
+  VENEER_OPS.push({ ns, name, params, results, entry: entryOf(`${ns}.${name}`), mem: "bulk" });
+}
 
 export { s32, u32, s64, u64, f32, f64 };

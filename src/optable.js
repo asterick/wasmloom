@@ -170,15 +170,38 @@ op("i64", "trunc_sat_f32_u", [0xfc, 0x05], ["f32"], ["i64"]);
 op("i64", "trunc_sat_f64_s", [0xfc, 0x06], ["f64"], ["i64"]);
 op("i64", "trunc_sat_f64_u", [0xfc, 0x07], ["f64"], ["i64"]);
 
-// --- memory (basic full-width only; sized variants are deferred per DESIGN.md) ---
+// --- memory loads/stores ---
 op("i32", "load", 0x28, ["i32"], ["i32"], { mem: "load", size: 4 });
 op("i64", "load", 0x29, ["i32"], ["i64"], { mem: "load", size: 8 });
 op("f32", "load", 0x2a, ["i32"], ["f32"], { mem: "load", size: 4 });
 op("f64", "load", 0x2b, ["i32"], ["f64"], { mem: "load", size: 8 });
+op("i32", "load8_s", 0x2c, ["i32"], ["i32"], { mem: "load", size: 1 });
+op("i32", "load8_u", 0x2d, ["i32"], ["i32"], { mem: "load", size: 1 });
+op("i32", "load16_s", 0x2e, ["i32"], ["i32"], { mem: "load", size: 2 });
+op("i32", "load16_u", 0x2f, ["i32"], ["i32"], { mem: "load", size: 2 });
+op("i64", "load8_s", 0x30, ["i32"], ["i64"], { mem: "load", size: 1 });
+op("i64", "load8_u", 0x31, ["i32"], ["i64"], { mem: "load", size: 1 });
+op("i64", "load16_s", 0x32, ["i32"], ["i64"], { mem: "load", size: 2 });
+op("i64", "load16_u", 0x33, ["i32"], ["i64"], { mem: "load", size: 2 });
+op("i64", "load32_s", 0x34, ["i32"], ["i64"], { mem: "load", size: 4 });
+op("i64", "load32_u", 0x35, ["i32"], ["i64"], { mem: "load", size: 4 });
 op("i32", "store", 0x36, ["i32", "i32"], [], { mem: "store", size: 4 });
 op("i64", "store", 0x37, ["i32", "i64"], [], { mem: "store", size: 8 });
 op("f32", "store", 0x38, ["i32", "f32"], [], { mem: "store", size: 4 });
 op("f64", "store", 0x39, ["i32", "f64"], [], { mem: "store", size: 8 });
+op("i32", "store8", 0x3a, ["i32", "i32"], [], { mem: "store", size: 1 });
+op("i32", "store16", 0x3b, ["i32", "i32"], [], { mem: "store", size: 2 });
+op("i64", "store8", 0x3c, ["i32", "i64"], [], { mem: "store", size: 1 });
+op("i64", "store16", 0x3d, ["i32", "i64"], [], { mem: "store", size: 2 });
+op("i64", "store32", 0x3e, ["i32", "i64"], [], { mem: "store", size: 4 });
+
+// --- bulk memory / data segments (immediate encoding via `imm`) ---
+op("memory", "size", 0x3f, [], ["i32"], { imm: "mem" });
+op("memory", "grow", 0x40, ["i32"], ["i32"], { imm: "mem" });
+op("memory", "init", [0xfc, 0x08], ["i32", "i32", "i32"], [], { imm: "data+mem" });
+op("data", "drop", [0xfc, 0x09], [], [], { imm: "data" });
+op("memory", "copy", [0xfc, 0x0a], ["i32", "i32", "i32"], [], { imm: "mem+mem" });
+op("memory", "fill", [0xfc, 0x0b], ["i32", "i32", "i32"], [], { imm: "mem" });
 
 export const OPTABLE = table;
 

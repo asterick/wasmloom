@@ -137,7 +137,7 @@ of blocks — conditional values are written to locals in each arm, or use
   `mod.table()`, `mod.data()`, `mod.elem()`, `mod.start(fn)`.
 - Function types are interned/deduplicated into the type section automatically.
 - Loads/stores take the memory handle explicitly (`s32.load(mem, addr, {offset,
-  align})`) so multi-memory bolts on later without an API break.
+  align})`) so multi-memory bolts on later without an API break — see *Memory*.
 
 ### Variables, imports, exports
 
@@ -211,6 +211,30 @@ of blocks — conditional values are written to locals in each arm, or use
   and plain numbers only when `Number.isSafeInteger(n)`; `f32.const` rounds
   doubles to float32 (unavoidable).
 
+### Memory
+
+- `mod.memory({ min, max? })` — limits in 64KiB pages, at most one memory per
+  module (imported or defined); `.import()`/`.export()` chain as usual.
+- Loads/stores take the memory handle explicitly (multi-memory bolts on
+  later). **Sized variants get their extension signedness from the type**:
+  `u32.load8` zero-extends, `s32.load16` sign-extends, `s64.load32`/`u64.load32`
+  likewise; stores (`store8/16/32`) truncate and are sign-agnostic (on both
+  namespaces). `{offset, align}` immediates are optional — align defaults to
+  the access width (bytes, power of two ≤ natural).
+- **Bulk operations live on the memory handle**: `mem.size()` and
+  `mem.grow(delta)` are `u32` expressions (grow yields the old size, or
+  2³²−1 on failure); `mem.fill(dst, byte, len)` and `mem.copy(dst, src, len)`
+  are statements. Addresses, counts, and byte values accept either 32-bit
+  signedness.
+- **Data segments are passive by default**: `mod.data(bytes)` takes a
+  `Uint8Array`/`ArrayBuffer` (copied at declaration — later mutation of the
+  source does not affect the module) and returns a handle. Chaining
+  `.at(mem, offset)` pins it active (copied at instantiation); `offset` is an
+  integer, an `s32`/`u32` const, or an imported immutable module variable.
+  Passive segments are used at runtime via `mem.init(seg, dst, src, len)` and
+  released with `seg.drop()` (both statements). The data-count section is
+  emitted automatically whenever segments exist.
+
 ### Evaluation-order semantics
 
 Expression nodes are *recorded*, not emitted, as the body callback runs:
@@ -245,12 +269,6 @@ may assume a shape for these beyond what's noted here.
   (active/passive/declared).
 - **Reference types as values** — `funcref`/`externref` variables and params,
   `ref.func` / `ref.null` / `ref.is_null`, typed `select` for references.
-- **Memory, fully specified** — data segments (active/passive,
-  `memory.init`/`data.drop`), `memory.size/grow/fill/copy`, the sized
-  load/store variants (`u32.load8`, `s32.load16`, … — extension signedness
-  from the type) and alignment defaults. (`mod.memory`
-  limits + basic handle-explicit `load`/`store` remain in scope for
-  the core.)
 - **SIMD (`v128`)** — in the Wasm 2.0 spec but explicitly descoped; the opcode
   table absorbs it later without design changes.
 - **`select`** — exact shape (per-type vs generic) undecided.

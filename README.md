@@ -46,12 +46,12 @@ build error.
 Working: functions (declare/body/import/export, forward decls, mutual
 recursion), the full Wasm 2.0 numeric instruction set, module and function
 variables (globals/locals with slot reuse), auto-bound multi-use expressions,
-multi-value returns with destructuring, basic memory load/store, start
-function, `$.switch`, `$.unreachable`, debug-mode creation traces.
+multi-value returns with destructuring, the full memory surface (sized
+loads/stores, mem.size/grow/fill/copy, active and passive data segments
+with mem.init/seg.drop), start function, `$.switch`, `$.unreachable`, debug-mode creation traces.
 
 Not yet (see the deferred list in DESIGN.md — API to be designed first):
-tables/`call_indirect`, reference types, data segments and sized memory ops,
-SIMD, `select`, custom sections. Irreducible control flow is detected and
+tables/`call_indirect`, reference types, SIMD, `select`, custom sections. Irreducible control flow is detected and
 rejected rather than lowered.
 
 ## Development
