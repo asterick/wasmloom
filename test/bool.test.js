@@ -88,15 +88,19 @@ test("bool → integer is a zero-cost cast; there is no int → bool cast", asyn
   assert.equal(exports.flag(123), 1);
 });
 
-test("the bool barrier is strict", () => {
+test("the bool barrier is one-way: bool lifts out freely, ints never lift in", async () => {
   const mod = new Module();
   const mem = mod.memory({ min: 1 });
-  mod.function([s32, bool], []).body((x, flag, $) => {
-    throws(() => s32.add(x, flag), /expected s32, got bool/); // bool is not an integer
-    throws(() => bool.and(flag, x), /expected bool, got s32/); // ints are not bools
+  mod.function([s32, bool], [s32]).export("f").body((x, flag, $) => {
+    // outbound: bool fits any integer exactly — lifts by default
+    s32.store(mem, flag, s32.add(x, flag));
+    // inbound: an integer does not fit a bool — always guarded
+    throws(() => bool.and(flag, x), /expected bool, got s32/);
     throws(() => bool.of(flag), /expected an integer.*got bool/); // already a bool
-    throws(() => s32.load(mem, flag), /expected a 32-bit integer.*got bool/); // not an address
     throws(() => bool.const(1), /expected true or false/);
     assert.equal(typeof bool.cast, "undefined"); // no int → bool cast exists
+    $.return(s32.load(mem, flag)); // bool as address: 0 or 1
   });
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.f(41, 1), 42);
 });

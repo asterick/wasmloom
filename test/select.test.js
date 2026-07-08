@@ -54,11 +54,12 @@ test("select evaluates BOTH arms (not short-circuiting)", async () => {
   assert.deepEqual(calls, ["a", "b"]); // both ran, in operand order
 });
 
-test("select arms must match the namespace; condition must be bool", () => {
+test("select arms must fit the namespace; condition must be bool", () => {
   const mod = new Module();
-  mod.function([s32, u32], []).body((a, b, $) => {
+  mod.function([s32, u32, s64], []).body((a, b, big, $) => {
     throws(() => s32.select(s32.eqz(a), a, b), /second arm: expected s32, got u32/);
-    throws(() => f64.select(s32.eqz(a), a, a), /first arm: expected f64, got s32/);
+    throws(() => f64.select(s32.eqz(a), big, big), /first arm: expected f64, got s64/); // not value-exact
     throws(() => s32.select(a, a, a), /condition: expected bool.*got s32/);
+    $.drop(f64.select(s32.eqz(a), a, f64.const(0))); // s32 arm lifts into f64 exactly
   });
 });

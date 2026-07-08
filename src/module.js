@@ -5,7 +5,7 @@ import { makeNode, resolveOperand, Node } from "./node.js";
 import { Variable } from "./variable.js";
 import { FunctionBuilder } from "./builder.js";
 import { encodeModule } from "./encode/encoder.js";
-import { MEMORY_OPS } from "./expr.js";
+import { MEMORY_OPS, promoteConst } from "./expr.js";
 
 /** Handle for a declared function. Declare first; attach `.body()` or `.import()` later. */
 export class FunctionHandle {
@@ -209,18 +209,19 @@ function checkLimits(limits, what) {
 /** A WebAssembly module under construction. */
 export class Module {
   /**
-   * @param {{debug?: boolean, permissive?: boolean, promote?: boolean}} [opts]
+   * Safe value-exact promotion is always on: operands lift into an op's
+   * namespace type when they fit exactly (s32→s64, u32→s64/u64, f32→f64,
+   * s32/u32→f64, bool→anything numeric). Lossy or narrowing moves are errors.
+   *
+   * @param {{debug?: boolean, permissive?: boolean}} [opts]
    *  - debug: capture creation stack traces for emit-time errors
    *  - permissive: bit-level leniency within a storage width — conditions
    *    accept integers (non-zero is true), integer positions accept the
-   *    opposite signedness and bool, bool positions test integers for ≠0
-   *  - promote: value-exact lifting into an op's namespace type
-   *    (s32→s64, u32→s64/u64, f32→f64, s32/u32→f64, bool→anything numeric)
+   *    opposite signedness, bool positions test integers for ≠0
    */
   constructor(opts = {}) {
     this.debug = opts.debug ?? false;
     this.permissive = opts.permissive ?? false;
-    this.promote = opts.promote ?? false;
     this.functions = [];
     this.variables = [];
     this.memories = [];
@@ -312,7 +313,12 @@ function resolveModuleInit(type, init) {
     if (init.kind !== "const") {
       fail(`mod.variable init: must be a constant expression (${type.name}.const, or an imported immutable variable)`);
     }
-    if (init.type !== type) fail(`mod.variable init: expected ${type.name}, got ${init.type.name}`);
+    if (init.type !== type) {
+      // Constant promotion happens at build time — the result is still a t.const.
+      const lifted = promoteConst(init, type);
+      if (lifted) return { kind: "const", node: lifted };
+      fail(`mod.variable init: expected ${type.name}, got ${init.type.name}`);
+    }
     return { kind: "const", node: init };
   }
   if (init?.handleKind === "variable" && init.scope === "module") {

@@ -27,18 +27,16 @@ const U32_MAX = 0xffffffff;
 
 // --- operand helpers ---------------------------------------------------------
 
-/** Any 32-bit integer (s32 or u32) — used where wasm is sign-agnostic by position. */
+/**
+ * Any 32-bit integer — used where wasm is sign-agnostic by position.
+ * bool is accepted too (0/1 fits exactly; safe promotion is the default).
+ */
 export function resolveInt32(x, what) {
   const v = resolveOperand(x, null, what);
-  if (v.type.wasmType !== I32 || (v.type === bool && !currentPermissive())) {
+  if (v.type.wasmType !== I32) {
     fail(`${what}: expected a 32-bit integer (s32 or u32), got ${v.type.name}`);
   }
   return v;
-}
-
-function currentPermissive() {
-  const b = requireBuilder("operand resolution");
-  return b.module.permissive;
 }
 
 /** Zero-cost retype (same storage bits, new builder-level type). */
@@ -460,14 +458,17 @@ for (const [ns, name, params, results] of [
   VENEER_OPS.push({ ns, name, params, results, entry: entryOf(`${ns}.${name}`), mem: "bulk" });
 }
 
-// --- opt-in coercion modes -----------------------------------------------------
-// Strict is the default. `permissive` is bit-level leniency within a storage
-// width; `promote` is value-exact lifting into the expected type (never lossy,
-// never narrowing, never float→int). Both are per-Module flags.
+// --- coercion ---------------------------------------------------------------
+// Safe promotion is DEFAULT behavior: since the consuming op's namespace
+// explicitly names the target type, any operand whose value fits it exactly
+// lifts in — there is nothing implicit to guard. Lossy or narrowing moves
+// (s64→f64, s32→f32, u32→s32, float→int, int→bool) always stay errors.
+// `permissive` (per-Module flag) additionally allows bit-level reinterpretation
+// within a storage width — that DOES change meaning, so it's opt-in.
 
 const INTS = new Set([s32, u32, s64, u64]);
 
-/** promote: expected type → (operand type → conversion spec) — value-exact only */
+/** expected type → (operand type → conversion spec) — value-exact only */
 const PROMOTIONS = new Map([
   [s64, new Map([[s32, "i64.extend_i32_s"], [u32, "i64.extend_i32_u"], [bool, "i64.extend_i32_u"]])],
   [u64, new Map([[u32, "i64.extend_i32_u"], [bool, "i64.extend_i32_u"]])],
@@ -483,9 +484,13 @@ const PROMOTIONS = new Map([
 ]);
 
 setCoercion((v, expected, builder) => {
-  const { permissive, promote } = builder.module;
-  if (permissive) {
-    // Same storage width, integer/bool targets: a free retype.
+  const spec = PROMOTIONS.get(expected)?.get(v.type);
+  if (spec === "retype") return retype(v, expected);
+  if (spec) {
+    return makeNode("op", { results: [expected], entry: entryOf(spec), operands: [v], display: "promotion" });
+  }
+  if (builder.module.permissive) {
+    // Same storage width, integer targets: a free retype.
     if (INTS.has(expected) && expected.wasmType === v.type.wasmType) {
       return retype(v, expected);
     }
@@ -494,14 +499,22 @@ setCoercion((v, expected, builder) => {
       return truthiness(v, "implicit bool.of");
     }
   }
-  if (promote) {
-    const spec = PROMOTIONS.get(expected)?.get(v.type);
-    if (spec === "retype") return retype(v, expected);
-    if (spec) {
-      return makeNode("op", { results: [expected], entry: entryOf(spec), operands: [v], display: "promotion" });
-    }
-  }
   return null;
 });
+
+/**
+ * Build-time promotion for constant expressions (global initializers): the
+ * value converts at build time, so the result is still a plain t.const.
+ * Returns a fresh const node of `target`, or null when not value-exact.
+ */
+export function promoteConst(node, target) {
+  if (node.kind !== "const") return null;
+  if (!PROMOTIONS.get(target)?.has(node.type)) return null;
+  let v = node.value;
+  if (node.type === u32 && v < 0) v += 0x100000000; // stored sign-normalized
+  if (node.type === f32) v = Math.fround(v);
+  if (target === s64 || target === u64) return target.const(BigInt(v));
+  return target.const(v);
+}
 
 export { s32, u32, s64, u64, f32, f64, bool };

@@ -25,7 +25,8 @@ toolchain; emits binary `.wasm` bytes directly.
 | Zero-result ops | Auto-anchor as statements at their creation point (`u32.store(...)` is a statement) |
 | 64-bit immediates | BigInt always; plain numbers only when `Number.isSafeInteger`, else throw |
 | Consts | Range-checked per namespace: `s32.const` in [-2^31, 2^31), `u32.const` in [0, 2^32), etc.; `f32.const` rounds |
-| Modes | Strict by default. `permissive: true` — bit-level leniency within a storage width (integer conditions, mixed signedness, bool↔int). `promote: true` — value-exact lifting into an op's namespace type (never lossy). Tests stay strict except dedicated mode tests |
+| Safe promotion | Default behavior: operands lift value-exactly into an op's namespace type (s32/u32/bool→s64, u32/bool→u64, f32/s32/u32/bool→f64, bool→s32/u32/f32) — the namespace names the target explicitly, so nothing implicit is guarded. Lossy/narrowing always errors |
+| Permissive mode | `permissive: true` (opt-in, never default in tests) — bit-level leniency within a storage width: integer conditions, mixed signedness retypes, integers in bool positions get a real ≠0 test |
 | Diagnostics | `new Module({ debug: true })` captures creation stack traces for emit-time errors |
 | Types | Plain JS with JSDoc annotations |
 | Testing | Round-trip: instantiate output with V8 (`node --test`), assert executed results |
@@ -248,30 +249,27 @@ of blocks — conditional values are written to locals in each arm, or use
   released with `seg.drop()` (both statements). The data-count section is
   emitted automatically whenever segments exist.
 
-### Coercion modes
+### Safe promotion (default) and permissive mode
 
-Strict is the default and what the test suite runs — the flags below are
-opt-in per `Module` and must never become the ambient default for testing
-behavior (dedicated mode tests only).
-
-- **`permissive: true`** — bit-level leniency *within* a storage width:
-  conditions accept integers ("non-zero is true": 32-bit retypes for free
-  since `br_if`/`select` already test non-zero, 64-bit inserts a real ≠0
-  test); integer positions (including addresses/indices) accept the opposite
-  signedness and `bool` via zero-cost retype; `bool` operand positions accept
+- **Safe promotion is core semantics, not a mode.** The consuming op's
+  namespace explicitly names the target type, and only value-exact lifts
+  exist, so there is nothing implicit to guard: `f64.add(xf32, ys32)` lifts
+  both exactly; `s64.mul(a64, b_s32)` sign-extends; `u64.add(a, b_u32)`
+  zero-extends; `bool` lifts as 0/1 into anything numeric (which also makes
+  `bool` valid in address/index positions). Applies uniformly to operands,
+  call arguments, `$.return`, `.set()`, select arms, and store values.
+  Constant initializers promote at build time (the result is still a plain
+  `t.const`, so const-expr rules hold). Never lossy, never narrowing:
+  `s64`/`u64` → `f64` (53-bit mantissa), `s32` → `f32` (24-bit), `u32` ↔
+  `s32`, float → int, and int → bool all stay errors.
+- **`permissive: true`** (opt-in per Module; the test suite stays strict
+  except dedicated mode tests) — bit-level leniency *within* a storage
+  width: conditions accept integers ("non-zero is true": 32-bit retypes for
+  free, 64-bit inserts a real ≠0 test); integer positions accept the
+  opposite signedness via zero-cost retype; `bool` operand positions accept
   integers by inserting a ≠0 test — never a bit-reinterpretation, so
   `bool.and(flag, 2)` means `flag && (2 ≠ 0)`. Constants stay range-strict;
-  floats never coerce; cross-width stays explicit.
-- **`promote: true`** — value-exact lifting into the namespace type of the
-  consuming op (the namespace remains the single source of result types):
-  `s32`/`u32`/`bool` → `s64`, `u32`/`bool` → `u64`, `f32`/`s32`/`u32`/`bool`
-  → `f64`, `bool` → `s32`/`u32`/`f32`. So `f64.add(xf32, ys32)` lifts both
-  exactly. Never lossy, never narrowing: `s64`/`u64` → `f64` (53-bit
-  mantissa), `s32` → `f32` (24-bit), `u32` → `s32`, and float → int all stay
-  errors. Applies uniformly to operands, call arguments, `$.return`, and
-  `.set()`.
-- The flags compose (`{ permissive: true, promote: true }`) and are
-  independent of `debug`.
+  floats never coerce; cross-width stays promotion's (value-exact) domain.
 
 ### Evaluation-order semantics
 
