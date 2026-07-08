@@ -184,10 +184,10 @@ test("$.unreachable traps", async () => {
   assert.throws(() => exports.boom(), WebAssembly.RuntimeError);
 });
 
-test("irreducible control flow is detected and rejected", () => {
+test("irreducible control flow: a two-entry loop compiles and runs", async () => {
   const mod = new Module();
   // A loop with two entries: entry jumps into B directly, while A falls into
-  // B and B jumps back to A.
+  // B and B jumps back to A. Lowered by node splitting in the reduce pass.
   mod.function([s32], [s32]).export("f").body((x, $) => {
     const a = $.label.ahead();
     const b = $.label.ahead();
@@ -198,7 +198,10 @@ test("irreducible control flow is detected and rejected", () => {
     $.gotoIf(s32.lt(x, s32.const(10)), a);
     $.return(x);
   });
-  assert.throws(() => mod.emit(), /irreducible/);
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.f(0), 10); // enters at A, increments to 10
+  assert.equal(exports.f(5), 10); // enters at B, loops back through A
+  assert.equal(exports.f(42), 42); // enters at B, exits immediately
 });
 
 test("collatz: loops, chains, and calls combined", async () => {

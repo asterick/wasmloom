@@ -3,7 +3,7 @@ import { fail } from "../errors.js";
 /**
  * Reconstruct structured control flow (block/loop/if/br/br_if/br_table) from
  * the CFG, following the dominator-tree approach of Ramsey's "Beyond
- * Relooper". Irreducible graphs are detected and rejected for now.
+ * Relooper". Expects a reducible graph — the reduce pass runs first.
  *
  * Output: a tree of items — linear instrs (from linearize) plus
  *   { op: 'block'|'loop', body: [...] }
@@ -33,8 +33,8 @@ export function reloop(builder, cfg, code) {
         backEdges++;
         if (!dominates(b, p)) {
           fail(
-            `function ${builder.handle.debugName()}: irreducible control flow (a goto jumps into ` +
-            `the middle of a loop from outside it) — not yet supported`,
+            `internal: function ${builder.handle.debugName()}: relooper received an ` +
+            `irreducible CFG after the reduce pass`,
           );
         }
       } else {

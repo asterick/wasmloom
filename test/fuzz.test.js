@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, bool, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, bool } from "../src/index.js";
 
 // Differential fuzzing of the relooper/liveness pipeline: generate random
 // label/goto/branch/switch programs, run them through a trivial JS
 // interpreter of the same CFG, and compare against the compiled wasm.
-// Irreducible programs (correctly rejected at emit) are skipped.
+// Irreducible programs are lowered by the reduce pass, so every seed runs.
 
 function mulberry32(seed) {
   return function () {
@@ -84,18 +84,12 @@ function build(blocks) {
 
 test("random CFGs: compiled wasm matches a reference interpreter", async () => {
   const INPUTS = [0, 1, 7, -3, 12345, 999999];
-  let valid = 0;
-  let irreducible = 0;
   for (let seed = 1; seed <= 60; seed++) {
     const blocks = genProgram(mulberry32(seed * 0x9e3779b9));
     let bytes;
     try {
       bytes = build(blocks).emit();
     } catch (e) {
-      if (e instanceof WasmEmitError && /irreducible/.test(e.message)) {
-        irreducible++;
-        continue;
-      }
       e.message = `seed ${seed}: ${e.message}`;
       throw e;
     }
@@ -108,8 +102,5 @@ test("random CFGs: compiled wasm matches a reference interpreter", async () => {
         `seed ${seed}, input ${input}`,
       );
     }
-    valid++;
   }
-  // The fuzzer must actually be exercising the pipeline, not skipping everything.
-  assert.ok(valid >= 15, `only ${valid} of 60 seeds were reducible (${irreducible} irreducible)`);
 });

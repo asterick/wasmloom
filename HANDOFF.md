@@ -6,7 +6,7 @@ State snapshot for picking this project back up. Last updated: 2026-07-08.
 
 A JavaScript library for generating WebAssembly binaries via expression
 builders — no external toolchain, `mod.emit()` → `Uint8Array`. The whole
-Wasm 2.0 surface is implemented **except SIMD**. 166 tests, all passing
+Wasm 2.0 surface is implemented **except SIMD**. 171 tests, all passing
 (`npm test`, Node ≥ 18, zero dependencies).
 
 **`DESIGN.md` is the contract.** Every API shape in it was explicitly
@@ -24,11 +24,14 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
                  ─► dominators (passes/dominators.js: RPO + CHK idoms)
                  ─► linearize (passes/linearize.js: multi-use → temps,
                      dominance checks, flat stack-form per block)
+                 ─► reduce (passes/reduce.js: irreducible CFGs lowered by
+                     node splitting; selector + br_table dispatch loop
+                     once duplication exceeds a block budget)
                  ─► liveness + slot coloring (passes/liveness.js, slots.js:
                      locals share slots across disjoint live ranges,
                      pooled by wasm storage type)
                  ─► relooper (passes/relooper.js: Ramsey's "Beyond
-                     Relooper"; irreducible CFGs detected and REJECTED)
+                     Relooper"; expects reducible input — reduce runs first)
                  ─► encoder (encode/encoder.js + leb.js: sections, LEB128)
 ```
 
@@ -77,6 +80,10 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
 - `fuzz` (CFG/relooper) and `expr-fuzz` (expression semantics) — the two
   differential fuzzers; extend these before hand-writing many cases.
 - `memory-sweep` — all load/store variants vs DataView; bulk-op semantics.
+- `irreducible` — crafted multi-entry loops: br_table into a loop, temps
+  across split copies, nesting, a complete switch web that deterministically
+  exhausts the split budget and exercises the dispatch-loop fallback, and
+  byte-determinism across builds.
 - Feature files: `basic`, `control`, `module`, `semantics`, `memory`,
   `tables`, `signedness`, `bool`, `select`, `promotion`, `modes`,
   `errors` (~35 eager-error paths), `binary` (section-level asserts),
@@ -84,18 +91,13 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
 
 ## Queue (in priority order)
 
-1. **Irreducible control-flow lowering** — engineering, no design session
-   needed. relooper currently `fail()`s on multi-entry loops; implement
-   node-splitting (+ dispatch-loop fallback). Payoff: the CFG fuzzer's
-   skipped irreducible seeds (~40%) become live differential coverage —
-   remove the skip in `test/fuzz.test.js` when done.
-2. **SIMD (`v128`)** — needs a short design session first (open question:
+1. **SIMD (`v128`)** — needs a short design session first (open question:
    do lane namespaces follow signedness, e.g. `s8x16`/`u8x16`?). Then
    mechanical: optable entries + veneer registration + sweep references.
-3. **Polish (no design needed)**: `local.tee` peephole (set+get pairs),
+2. **Polish (no design needed)**: `local.tee` peephole (set+get pairs),
    drop synthetic zero-init when a slot is provably fresh, generated
    `.d.ts` from JSDoc.
-4. **Pinned (do not do unless asked)**: custom sections / name section —
+3. **Pinned (do not do unless asked)**: custom sections / name section —
    see DESIGN.md's "Pinned" section.
 
 ## Working conventions

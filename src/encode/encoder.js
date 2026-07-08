@@ -4,6 +4,7 @@ import { OPS } from "../optable.js";
 import { typeKey } from "../types.js";
 import { analyzeCfg } from "../passes/dominators.js";
 import { linearize } from "../passes/linearize.js";
+import { makeReducible } from "../passes/reduce.js";
 import { computeLiveness } from "../passes/liveness.js";
 import { allocateSlots } from "../passes/slots.js";
 import { reloop } from "../passes/relooper.js";
@@ -226,8 +227,12 @@ export function encodeModule(module) {
 /** Run the full pipeline for one defined function. */
 function compileFunction(fn) {
   const builder = fn.builderData;
-  const cfg = analyzeCfg(builder.entry);
+  let cfg = analyzeCfg(builder.entry);
   const code = linearize(builder, cfg);
+  // Multi-use dominance was checked against the CFG as written; lowering
+  // irreducible flow (splitting/dispatch) preserves execution order, so
+  // everything downstream runs on the rewritten graph.
+  cfg = makeReducible(builder, cfg, code);
   const liveOut = computeLiveness(builder.blocks, code, cfg);
   const { slotOf, localsDecl } = allocateSlots(builder, code, liveOut, cfg);
   const tree = reloop(builder, cfg, code);

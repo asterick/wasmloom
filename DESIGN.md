@@ -100,13 +100,12 @@ sum.body((n, $) => {
   any nested `$.if`/`$.while` callback of the same body — placement lands
   wherever the instruction stream currently is, and jumping into a
   conditional arm from outside it is legal (the target simply becomes a merge
-  point). The two guardrails: placement (like `goto`) must happen while the
+  point). The one guardrail: placement (like `goto`) must happen while the
   label's own `.body()` callback is running — escaping a label to another
-  function's body or past body completion is an eager error — and a
-  placement that creates a multi-entry loop is rejected as irreducible at
-  `emit()`.
-- Arbitrary jumps may produce **irreducible** control flow; the relooper must
-  handle it in v1 (node splitting, dispatch-loop fallback for pathological cases).
+  function's body or past body completion is an eager error.
+- Arbitrary jumps may produce **irreducible** control flow; the emit pipeline
+  lowers it before the relooper runs (node splitting, dispatch-loop fallback
+  for pathological cases).
 
 Structured sugar desugars to labels in the CFG:
 
@@ -355,8 +354,9 @@ builder callbacks ──► CFG of basic blocks (typed instructions, virtual loc
 
 - Locals are non-SSA virtual registers in the CFG; liveness drives slot sharing.
 - Relooper follows the dominator-tree approach of Ramsey's *Beyond Relooper*
-  (as used in wasm-tools), with node splitting / dispatch fallback for
-  irreducible graphs.
+  (as used in wasm-tools); a pre-pass lowers irreducible graphs by node
+  splitting, falling back to a selector + `br_table` dispatch loop once
+  duplication exceeds a block budget.
 - Instructions are described by a single data-driven opcode table (name,
   immediates, signature, encoding) that generates both the expression
   constructors and the encoder — one place to add an instruction.
