@@ -183,3 +183,40 @@ test("$.unreachable traps", async () => {
   const { exports } = await instantiate(mod);
   assert.throws(() => exports.boom(), WebAssembly.RuntimeError);
 });
+
+test("irreducible control flow is detected and rejected", () => {
+  const mod = new Module();
+  // A loop with two entries: entry jumps into B directly, while A falls into
+  // B and B jumps back to A.
+  mod.function([i32], [i32]).export("f").body((x, $) => {
+    const a = $.label.ahead();
+    const b = $.label.ahead();
+    $.gotoIf(x, b);
+    a.here();
+    x.set(i32.add(x, i32.const(1)));
+    b.here();
+    $.gotoIf(i32.lt_s(x, i32.const(10)), a);
+    $.return(x);
+  });
+  assert.throws(() => mod.emit(), /irreducible/);
+});
+
+test("collatz: loops, chains, and calls combined", async () => {
+  const mod = new Module();
+  mod.function([i32], [i32]).export("collatz").body((n, $) => {
+    const steps = $.variable(i32);
+    $.while(i32.gt_s(n, i32.const(1)), ($) => {
+      $.if(i32.and(n, i32.const(1)), ($) => {
+        n.set(i32.add(i32.mul(n, i32.const(3)), i32.const(1)));
+      }).else(($) => {
+        n.set(i32.div_s(n, i32.const(2)));
+      });
+      steps.set(i32.add(steps, i32.const(1)));
+    });
+    $.return(steps);
+  });
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.collatz(1), 0);
+  assert.equal(exports.collatz(6), 8);
+  assert.equal(exports.collatz(27), 111);
+});
