@@ -89,8 +89,12 @@ export function linearize(builder, cfg) {
               out.push(v.scope === "module" ? { k: "gget", g: v } : { k: "get", v: v.vlocal });
               break;
             }
+            case "reffunc":
+              out.push({ k: "reffunc", fn: node.func });
+              break;
             case "op":
             case "call":
+            case "call_indirect":
             case "set":
             case "drop":
             case "cast":
@@ -105,10 +109,20 @@ export function linearize(builder, cfg) {
         } else {
           switch (node.kind) {
             case "op":
-              out.push({ k: "op", entry: node.entry, memarg: node.memarg, segment: node.segment });
+              out.push({
+                k: "op",
+                entry: node.entry,
+                memarg: node.memarg,
+                segment: node.segment,
+                table: node.table,
+                srcTable: node.srcTable,
+                selectType: node.selectType,
+              });
               break;
             case "call":
-              out.push({ k: "call", fn: node.func });
+            case "call_indirect":
+              if (node.kind === "call") out.push({ k: "call", fn: node.func });
+              else out.push({ k: "call_indirect", type: node.funcType, table: node.table });
               if (node.spillTemps) {
                 for (let i = node.spillTemps.length - 1; i >= 0; i--) {
                   out.push({ k: "set", v: node.spillTemps[i] });

@@ -1,6 +1,7 @@
 import { fail } from "./errors.js";
 import { checkValType } from "./types.js";
-import { resolveInt32, resolveBool } from "./expr.js";
+import { resolveInt32, resolveBool, defaultInit } from "./expr.js";
+import { isRef } from "./types.js";
 import { Block, Label, successors } from "./cfg.js";
 import { makeNode, resolveOperand, describeNode } from "./node.js";
 import { Variable } from "./variable.js";
@@ -118,7 +119,7 @@ export class FunctionBuilder {
       }
     }
     for (const node of this.nodes) {
-      if (node.kind !== "call" || node.results.length === 0) continue;
+      if ((node.kind !== "call" && node.kind !== "call_indirect") || node.results.length === 0) continue;
       const consumed = node.spillTemps
         ? node.spillTemps.some((t) => readVLocals.has(t))
         : node.consumers.length > 0;
@@ -228,7 +229,7 @@ function makeDollar(b) {
       checkValType(type, "$.variable");
       const vlocal = b.newVLocal(type, "var");
       const handle = new Variable("function", type, { builder: b, vlocal });
-      handle.set(init === undefined ? type.const(type.zero) : wrapInit(type, init));
+      handle.set(init === undefined ? defaultInit(type) : wrapInit(type, init));
       return handle;
     },
 
@@ -327,5 +328,6 @@ function wrapInit(type, init) {
   if (typeof init === "number" || typeof init === "bigint" || typeof init === "boolean") {
     return type.const(init);
   }
+  if (init === null && isRef(type)) return type.null();
   return init;
 }

@@ -36,7 +36,9 @@ export function describeNode(n) {
     case "read": return `read of ${n.variable.describe()}`;
     case "op": return n.display ?? `${n.entry.ns}.${n.entry.name}`;
     case "cast": return n.display ?? "cast";
+    case "reffunc": return `ref to ${n.func.debugName()}`;
     case "call": return `call to ${n.func.debugName()}`;
+    case "call_indirect": return n.display ?? "indirect call";
     case "set": return `set of ${n.variable.describe()}`;
     case "drop": return "drop";
     default: return n.kind;
@@ -50,7 +52,9 @@ export function describeNode(n) {
  */
 export function makeNode(kind, fields, opts = {}) {
   const n = new Node(kind, fields);
-  if (kind === "const") {
+  // Pure leaves (constants, ref.func) are emitted per use and may be built
+  // outside any body (they're constant expressions).
+  if (kind === "const" || kind === "reffunc") {
     const b = currentBuilder();
     if (b?.module.debug) n.trace = new Error().stack;
     return n;

@@ -12,16 +12,18 @@ const SECTION = {
   type: 1,
   import: 2,
   function: 3,
+  table: 4,
   memory: 5,
   global: 6,
   export: 7,
   start: 8,
+  elem: 9,
   code: 10,
   data: 11,
   dataCount: 12,
 };
 
-const EXPORT_KIND = { func: 0, memory: 2, global: 3 };
+const EXPORT_KIND = { func: 0, table: 1, memory: 2, global: 3 };
 
 /** Assemble the whole module into binary wasm bytes. */
 export function encodeModule(module) {
@@ -38,6 +40,27 @@ export function encodeModule(module) {
   const importedMems = module.memories.filter((m) => m.importInfo);
   const definedMems = module.memories.filter((m) => !m.importInfo);
   [...importedMems, ...definedMems].forEach((m, i) => (m.index = i));
+
+  const importedTables = module.tables.filter((t) => t.importInfo);
+  const definedTables = module.tables.filter((t) => !t.importInfo);
+  [...importedTables, ...definedTables].forEach((t, i) => (t.index = i));
+
+  // Element segments: user segments in declaration order, then (if any
+  // function was ref.func'd) one hidden declarative segment satisfying the
+  // spec's declaration requirement.
+  const elemSegments = [...module.elemSegments];
+  if (module.refFunctions.size > 0) {
+    elemSegments.push({ declarative: true, items: [...module.refFunctions], active: null });
+  }
+  elemSegments.forEach((seg, i) => (seg.index = i));
+  for (const seg of elemSegments) {
+    if (seg.active?.offset.kind === "global") {
+      const ref = seg.active.offset.variable;
+      if (!ref.importInfo || ref.mutable) {
+        fail(".at(): an offset variable must be an imported immutable module variable");
+      }
+    }
+  }
 
   const importedGlobals = module.variables.filter((g) => g.importInfo);
   const definedGlobals = module.variables.filter((g) => !g.importInfo);
@@ -79,6 +102,9 @@ export function encodeModule(module) {
   for (const f of [...importedFns, ...definedFns]) {
     f.typeIndex = internType(f.params, f.results);
   }
+  for (const ft of module.funcTypes) {
+    ft.typeIndex = internType(ft.params, ft.results);
+  }
 
   // Compile all defined bodies before writing anything. Compilation mutates
   // per-node state (temp assignment), so it runs once per function and is
@@ -98,6 +124,10 @@ export function encodeModule(module) {
 
   const imports = [
     ...importedFns.map((f) => ({ info: f.importInfo, write: (s) => s.u8(0x00).u32(f.typeIndex) })),
+    ...importedTables.map((t) => ({
+      info: t.importInfo,
+      write: (s) => { s.u8(0x01).u8(t.elemType.code); writeLimits(s, t.limits); },
+    })),
     ...importedMems.map((m) => ({
       info: m.importInfo,
       write: (s) => { s.u8(0x02); writeLimits(s, m.limits); },
@@ -119,6 +149,14 @@ export function encodeModule(module) {
   w.section(SECTION.function, (s) => {
     if (definedFns.length === 0) return;
     s.vec(definedFns, (sw, f) => sw.u32(f.typeIndex));
+  });
+
+  w.section(SECTION.table, (s) => {
+    if (definedTables.length === 0) return;
+    s.vec(definedTables, (sw, t) => {
+      sw.u8(t.elemType.code);
+      writeLimits(sw, t.limits);
+    });
   });
 
   w.section(SECTION.memory, (s) => {
@@ -150,6 +188,11 @@ export function encodeModule(module) {
     w.section(SECTION.start, (s) => s.u32(module.startFunction.index));
   }
 
+  w.section(SECTION.elem, (s) => {
+    if (elemSegments.length === 0) return;
+    s.vec(elemSegments, writeElemSegment);
+  });
+
   // The data-count section must precede code so memory.init/data.drop validate.
   if (module.dataSegments.length > 0) {
     w.section(SECTION.dataCount, (s) => s.u32(module.dataSegments.length));
@@ -169,16 +212,7 @@ export function encodeModule(module) {
     s.vec(module.dataSegments, (sw, seg) => {
       if (seg.active) {
         sw.u8(0x00);
-        const off = seg.active.offset;
-        if (off.kind === "int") {
-          const signed = off.value > 0x7fffffff ? off.value - 0x100000000 : off.value;
-          sw.u8(OPS.i32_const).s32(signed);
-        } else if (off.kind === "global") {
-          sw.u8(OPS.global_get).u32(off.variable.index);
-        } else {
-          writeConst(sw, off.node);
-        }
-        sw.u8(OPS.end);
+        writeConstOffset(sw, seg.active.offset);
       } else {
         sw.u8(0x01);
       }
@@ -206,12 +240,76 @@ function writeLimits(s, limits) {
 }
 
 function writeConst(s, node) {
+  if (node.kind === "reffunc") {
+    s.u8(OPS.ref_func).u32(node.func.index);
+    return;
+  }
   switch (node.type.wasmType.name) {
     case "i32": s.u8(OPS.i32_const).s32(node.value); break;
     case "i64": s.u8(OPS.i64_const).s64(node.value); break;
     case "f32": s.u8(OPS.f32_const).f32(node.value); break;
     case "f64": s.u8(OPS.f64_const).f64(node.value); break;
+    case "funcref":
+    case "externref":
+      s.u8(OPS.ref_null).u8(node.type.code);
+      break;
     default: fail(`internal: cannot encode const of ${node.type.name}`);
+  }
+}
+
+/** Constant offset expression for active data/element segments. */
+function writeConstOffset(s, off) {
+  if (off.kind === "int") {
+    const signed = off.value > 0x7fffffff ? off.value - 0x100000000 : off.value;
+    s.u8(OPS.i32_const).s32(signed);
+  } else if (off.kind === "global") {
+    s.u8(OPS.global_get).u32(off.variable.index);
+  } else {
+    writeConst(s, off.node);
+  }
+  s.u8(OPS.end);
+}
+
+/** One element segment, picking the tightest encoding flavor. */
+function writeElemSegment(s, seg) {
+  const exprForm = seg.items.some((f) => f === null);
+  const funcVec = () => s.vec(seg.items, (sw, f) => sw.u32(f.index));
+  const exprVec = () =>
+    s.vec(seg.items, (sw, f) => {
+      if (f) sw.u8(OPS.ref_func).u32(f.index);
+      else sw.u8(OPS.ref_null).u8(0x70);
+      sw.u8(OPS.end);
+    });
+  if (seg.declarative) {
+    s.u32(3).u8(0x00);
+    funcVec();
+  } else if (seg.active) {
+    const t = seg.active.table;
+    if (t.index === 0 && !exprForm) {
+      s.u32(0);
+      writeConstOffset(s, seg.active.offset);
+      funcVec();
+    } else if (!exprForm) {
+      s.u32(2).u32(t.index);
+      writeConstOffset(s, seg.active.offset);
+      s.u8(0x00);
+      funcVec();
+    } else if (t.index === 0) {
+      s.u32(4);
+      writeConstOffset(s, seg.active.offset);
+      exprVec();
+    } else {
+      s.u32(6).u32(t.index);
+      writeConstOffset(s, seg.active.offset);
+      s.u8(0x70);
+      exprVec();
+    }
+  } else if (!exprForm) {
+    s.u32(1).u8(0x00);
+    funcVec();
+  } else {
+    s.u32(5).u8(0x70);
+    exprVec();
   }
 }
 
@@ -269,6 +367,11 @@ function writeItem(w, item, slotOf) {
     case "gget": w.u8(OPS.global_get).u32(item.g.index); break;
     case "gset": w.u8(OPS.global_set).u32(item.g.index); break;
     case "op":
+      if (item.entry.select && item.selectType) {
+        // typed select — required when the arms are references
+        w.u8(OPS.select_typed).u32(1).u8(item.selectType.code);
+        break;
+      }
       w.bytes(item.entry.op);
       if (item.entry.mem) {
         w.u32(item.memarg.align).u32(item.memarg.offset);
@@ -278,11 +381,17 @@ function writeItem(w, item, slotOf) {
           case "mem+mem": w.u32(0).u32(0); break;
           case "data": w.u32(item.segment.index); break;
           case "data+mem": w.u32(item.segment.index).u32(0); break;
+          case "table": w.u32(item.table.index); break;
+          case "table+table": w.u32(item.table.index).u32(item.srcTable.index); break;
+          case "elem": w.u32(item.segment.index); break;
+          case "elem+table": w.u32(item.segment.index).u32(item.table.index); break;
           default: break; // no immediates
         }
       }
       break;
     case "call": w.u8(OPS.call).u32(item.fn.index); break;
+    case "call_indirect": w.u8(OPS.call_indirect).u32(item.type.typeIndex).u32(item.table.index); break;
+    case "reffunc": w.u8(OPS.ref_func).u32(item.fn.index); break;
     case "drop": w.u8(OPS.drop); break;
     default: fail(`internal: cannot encode item ${item.op ?? item.k}`);
   }

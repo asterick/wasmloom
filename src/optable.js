@@ -196,9 +196,23 @@ op("i64", "store16", 0x3d, ["i32", "i64"], [], { mem: "store", size: 2 });
 op("i64", "store32", 0x3e, ["i32", "i64"], [], { mem: "store", size: 4 });
 
 // --- parametric ---
-// select is type-polymorphic over the numeric types (one opcode); the veneer
-// layer types it per namespace. Params/results here are placeholders.
-op("select", "select", 0x1b, ["t", "t", "i32"], ["t"]);
+// select is type-polymorphic (one opcode); the veneer layer types it per
+// namespace, and reference arms switch to the typed encoding (0x1C) at emit.
+// Params/results here are placeholders.
+op("select", "select", 0x1b, ["t", "t", "i32"], ["t"], { select: true });
+
+// --- references ---
+op("ref", "is_null", 0xd1, ["ref"], ["i32"]);
+
+// --- tables (immediate encoding via `imm`) ---
+op("table", "get", 0x25, ["i32"], ["ref"], { imm: "table" });
+op("table", "set", 0x26, ["i32", "ref"], [], { imm: "table" });
+op("table", "init", [0xfc, 12], ["i32", "i32", "i32"], [], { imm: "elem+table" });
+op("elem", "drop", [0xfc, 13], [], [], { imm: "elem" });
+op("table", "copy", [0xfc, 14], ["i32", "i32", "i32"], [], { imm: "table+table" });
+op("table", "grow", [0xfc, 15], ["ref", "i32"], ["i32"], { imm: "table" });
+op("table", "size", [0xfc, 16], [], ["i32"], { imm: "table" });
+op("table", "fill", [0xfc, 17], ["i32", "ref", "i32"], [], { imm: "table" });
 
 // --- bulk memory / data segments (immediate encoding via `imm`) ---
 op("memory", "size", 0x3f, [], ["i32"], { imm: "mem" });
@@ -224,6 +238,10 @@ export const OPS = {
   return: 0x0f,
   call: 0x10,
   drop: 0x1a,
+  call_indirect: 0x11,
+  select_typed: 0x1c,
+  ref_null: 0xd0,
+  ref_func: 0xd2,
   local_get: 0x20,
   local_set: 0x21,
   global_get: 0x23,

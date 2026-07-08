@@ -5,7 +5,8 @@ import { makeNode, resolveOperand, Node } from "./node.js";
 import { Variable } from "./variable.js";
 import { FunctionBuilder } from "./builder.js";
 import { encodeModule } from "./encode/encoder.js";
-import { MEMORY_OPS, promoteConst } from "./expr.js";
+import { MEMORY_OPS, TABLE_OPS, promoteConst, defaultInit, resolveInt32 } from "./expr.js";
+import { funcref, externref, isRef } from "./types.js";
 
 /** Handle for a declared function. Declare first; attach `.body()` or `.import()` later. */
 export class FunctionHandle {
@@ -68,6 +69,17 @@ export class FunctionHandle {
     this.module._addExport(name, this, "func");
     this.exportName ??= name;
     return this;
+  }
+
+  /**
+   * A funcref to this function — a constant expression, valid outside bodies
+   * (e.g. in global initializers, table.set, elem-free contexts). The spec's
+   * ref.func declaration requirement is satisfied automatically via a hidden
+   * declarative element segment.
+   */
+  ref() {
+    this.module.refFunctions.add(this);
+    return makeNode("reffunc", { type: funcref, results: [funcref], func: this });
   }
 
   /**
@@ -143,6 +155,146 @@ export class MemoryHandle {
     this.module._addExport(name, this, "memory");
     this.exportName ??= name;
     return this;
+  }
+}
+
+/** A reusable function signature, interned into the type section. */
+export class FuncTypeHandle {
+  constructor(module, params, results) {
+    this.handleKind = "functype";
+    this.module = module;
+    this.params = params;
+    this.results = results;
+    this.typeIndex = -1; // assigned at emit
+  }
+}
+
+/** Handle for a table. Element type funcref or externref; limits in elements. */
+export class TableHandle {
+  constructor(module, elemType, limits) {
+    this.handleKind = "table";
+    this.module = module;
+    this.elemType = elemType;
+    this.limits = limits;
+    this.importInfo = null;
+    this.exportName = null;
+    this.index = -1;
+  }
+
+  /** Read entry `index` — a ref expression of the table's element type. */
+  get(index) {
+    return TABLE_OPS.get(this, index);
+  }
+
+  /** Write entry `index`. Statement. */
+  set(index, value) {
+    TABLE_OPS.set(this, index, value);
+  }
+
+  /** Current size in elements — a u32 expression. */
+  size() {
+    return TABLE_OPS.size(this);
+  }
+
+  /** Grow by `delta` entries filled with `init` (default null); u32: old size, or 2^32-1 on failure. */
+  grow(delta, init) {
+    return TABLE_OPS.grow(this, delta, init);
+  }
+
+  /** Fill `len` entries from `start` with `value`. Statement. */
+  fill(start, value, len) {
+    TABLE_OPS.fill(this, start, value, len);
+  }
+
+  /** Copy `len` entries from `src` to `dst`; `{ from }` selects another source table. Statement. */
+  copy(dst, src, len, opts) {
+    TABLE_OPS.copy(this, dst, src, len, opts);
+  }
+
+  /** Copy `len` entries from a passive element segment (at `src`) to `dst`. Statement. */
+  init(seg, dst, src, len) {
+    TABLE_OPS.init(this, seg, dst, src, len);
+  }
+
+  /**
+   * call_indirect through this table: the callee at `index` is checked at
+   * runtime against `type` (a mod.funcType handle), trapping on OOB, null,
+   * or signature mismatch. Results follow fn.call's rules.
+   */
+  call(type, index, ...args) {
+    const what = "tbl.call()";
+    const b = requireBuilder(what);
+    if (b.module !== this.module) fail(`${what}: table belongs to a different module`);
+    if (this.elemType !== funcref) {
+      fail(`${what}: call_indirect requires a funcref table, this one holds ${this.elemType.name}`);
+    }
+    if (type?.handleKind !== "functype") fail(`${what}: expected a mod.funcType handle as the signature`);
+    if (type.module !== this.module) fail(`${what}: signature belongs to a different module`);
+    if (args.length !== type.params.length) {
+      fail(`${what}: signature expects ${type.params.length} argument(s), got ${args.length}`);
+    }
+    const operands = type.params.map((t, i) => resolveOperand(args[i], t, `${what} argument ${i + 1}`));
+    operands.push(resolveInt32(index, `${what} index`)); // args, then index, on the stack
+    const anchor = type.results.length !== 1;
+    const node = makeNode(
+      "call_indirect",
+      { results: type.results, funcType: type, table: this, operands, display: what },
+      { anchor },
+    );
+    if (type.results.length === 0) return undefined;
+    if (type.results.length === 1) return node;
+    node.spillTemps = type.results.map((t) => b.newVLocal(t, "temp"));
+    return type.results.map(
+      (t, i) => new Variable("function", t, { builder: b, vlocal: node.spillTemps[i] }),
+    );
+  }
+
+  import(moduleName, name) {
+    if (this.importInfo) fail(".import(): table is already imported");
+    if (typeof moduleName !== "string" || typeof name !== "string") {
+      fail(".import(module, name): both arguments must be strings");
+    }
+    this.importInfo = { module: moduleName, name };
+    return this;
+  }
+
+  export(name) {
+    this.module._addExport(name, this, "table");
+    this.exportName ??= name;
+    return this;
+  }
+}
+
+/**
+ * An element segment (funcref entries: function handles or null). Passive by
+ * default (copied via `tbl.init`); `.at(table, offset)` makes it active.
+ */
+export class ElemSegment {
+  constructor(module, items) {
+    this.handleKind = "elem";
+    this.module = module;
+    this.items = items;
+    this.active = null; // { table, offset }
+    this.declarative = false;
+    this.index = -1;
+  }
+
+  /** Pin as active: copied into `table` at `offset` when the module instantiates. */
+  at(table, offset) {
+    if (this.active) fail(".at(): element segment is already active");
+    if (table?.handleKind !== "table" || table.module !== this.module) {
+      fail(".at(): expected a table handle from this module");
+    }
+    if (table.elemType !== funcref) {
+      fail(".at(): element segments hold funcref — the table must be funcref-typed");
+    }
+    this.active = { table, offset: resolveDataOffset(offset) };
+    return this;
+  }
+
+  /** elem.drop — release the segment's contents at runtime. Statement. */
+  drop() {
+    TABLE_OPS.dropElem(this);
   }
 }
 
@@ -225,18 +377,78 @@ export class Module {
     this.functions = [];
     this.variables = [];
     this.memories = [];
+    this.tables = [];
+    this.funcTypes = [];
     this.dataSegments = [];
+    this.elemSegments = [];
+    this.refFunctions = new Set(); // ref.func'd — auto-declared at emit
     this.exports = [];
     this.exportNames = new Set();
     this.startFunction = null;
   }
 
-  /** Declare a function. Attach `.body()`, `.import()`, `.export()` on the returned handle. */
-  function(params, results) {
-    const p = checkTypeList(params, "mod.function params");
-    const r = checkTypeList(results, "mod.function results");
+  /**
+   * Declare a function. Attach `.body()`, `.import()`, `.export()` on the
+   * returned handle. Accepts either (params, results) arrays or a single
+   * mod.funcType handle.
+   */
+  function(paramsOrType, results) {
+    let p, r;
+    if (paramsOrType?.handleKind === "functype") {
+      if (paramsOrType.module !== this) fail("mod.function: funcType belongs to a different module");
+      if (results !== undefined) fail("mod.function: pass either a funcType or (params, results), not both");
+      p = paramsOrType.params;
+      r = paramsOrType.results;
+    } else {
+      p = checkTypeList(paramsOrType, "mod.function params");
+      r = checkTypeList(results, "mod.function results");
+    }
     const handle = new FunctionHandle(this, p, r);
     this.functions.push(handle);
+    return handle;
+  }
+
+  /** Declare a reusable function signature (for call_indirect and mod.function). */
+  funcType(params, results) {
+    const handle = new FuncTypeHandle(
+      this,
+      checkTypeList(params, "mod.funcType params"),
+      checkTypeList(results, "mod.funcType results"),
+    );
+    this.funcTypes.push(handle);
+    return handle;
+  }
+
+  /** Declare a table of funcref or externref elements. Limits in elements. */
+  table(elemType, limits) {
+    if (elemType !== funcref && elemType !== externref) {
+      fail("mod.table: element type must be funcref or externref");
+    }
+    if (limits === null || typeof limits !== "object") fail("mod.table: expected { min, max? }");
+    const { min, max } = limits;
+    if (!Number.isInteger(min) || min < 0) fail("mod.table: min must be a non-negative integer");
+    if (max !== undefined && (!Number.isInteger(max) || max < min)) {
+      fail("mod.table: max must be an integer ≥ min");
+    }
+    const handle = new TableHandle(this, elemType, { min, max });
+    this.tables.push(handle);
+    return handle;
+  }
+
+  /**
+   * Declare an element segment: an array of function handles (or null).
+   * Passive unless `.at(table, offset)` chains.
+   */
+  elem(items) {
+    if (!Array.isArray(items)) fail("mod.elem: expected an array of function handles (or null)");
+    for (const f of items) {
+      if (f === null) continue;
+      if (f?.handleKind !== "function" || f.module !== this) {
+        fail("mod.elem: items must be function handles from this module, or null");
+      }
+    }
+    const handle = new ElemSegment(this, [...items]);
+    this.elemSegments.push(handle);
     return handle;
   }
 
@@ -305,11 +517,16 @@ export class Module {
  * variable handle. Checked further at emit.
  */
 function resolveModuleInit(type, init) {
-  if (init === undefined) return { kind: "const", node: type.const(type.zero) };
+  if (init === undefined) return { kind: "const", node: defaultInit(type) };
+  if (init === null && isRef(type)) return { kind: "const", node: type.null() };
   if (typeof init === "number" || typeof init === "bigint" || typeof init === "boolean") {
     return { kind: "const", node: type.const(init) };
   }
   if (init instanceof Node) {
+    if (init.kind === "reffunc") {
+      if (init.type !== type) fail(`mod.variable init: expected ${type.name}, got ${init.type.name}`);
+      return { kind: "const", node: init };
+    }
     if (init.kind !== "const") {
       fail(`mod.variable init: must be a constant expression (${type.name}.const, or an imported immutable variable)`);
     }

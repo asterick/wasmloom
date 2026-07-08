@@ -1,6 +1,6 @@
 import { fail } from "./errors.js";
 import { OPTABLE } from "./optable.js";
-import { i32 as I32, i64 as I64, f32, f64, s32, u32, s64, u64, bool } from "./types.js";
+import { i32 as I32, i64 as I64, f32, f64, s32, u32, s64, u64, bool, funcref, externref, isRef } from "./types.js";
 import { makeNode, resolveOperand, setCoercion } from "./node.js";
 import { requireBuilder } from "./context.js";
 
@@ -355,6 +355,29 @@ for (const [from, key] of [[s32, "i32.eqz"], [u32, "i32.eqz"], [s64, "i64.eqz"],
   VENEER_OPS.push({ ns: "bool", name: "of", params: [from], results: [bool], entry: entryOf(key) });
 }
 
+// --- references ----------------------------------------------------------------
+// wasm 2.0 gives references almost no operations: null, is_null, select, and
+// storage in variables/params/results/tables. No equality, no casts, never in
+// linear memory, and neither promotion nor permissive mode touches them.
+
+function buildRefNamespace(T) {
+  /** Null reference — a constant expression, valid in initializers. */
+  T.null = () => makeNode("const", { type: T, results: [T], value: null });
+  T.is_null = (x) => {
+    const what = `${T.name}.is_null`;
+    const v = resolveOperand(x, T, what);
+    return makeNode("op", { results: [bool], entry: entryOf("ref.is_null"), operands: [v], display: what });
+  };
+  VENEER_OPS.push({ ns: T.name, name: "is_null", params: [T], results: [bool], entry: entryOf("ref.is_null"), mem: "ref" });
+}
+buildRefNamespace(funcref);
+buildRefNamespace(externref);
+
+/** Zero-initialization value for a type: null for references, zero otherwise. */
+export function defaultInit(type) {
+  return isRef(type) ? type.null() : type.const(type.zero);
+}
+
 // --- select: branchless ternary, typed by namespace ---------------------------
 // NOTE: both arms are ALWAYS evaluated (select is not short-circuiting — that's
 // its point: no branch). Use $.if when an arm has effects that must be guarded.
@@ -367,13 +390,19 @@ function defSelect(T) {
     const c = resolveBool(cond, `${display} condition`);
     const a = resolveOperand(ifTrue, T, `${display} first arm`);
     const b = resolveOperand(ifFalse, T, `${display} second arm`);
-    // wasm stack order: val1, val2, cond
-    return makeNode("op", { results: [T], entry: SELECT_ENTRY, operands: [a, b, c], display });
+    // wasm stack order: val1, val2, cond; reference arms need the typed encoding
+    return makeNode("op", {
+      results: [T],
+      entry: SELECT_ENTRY,
+      operands: [a, b, c],
+      display,
+      selectType: isRef(T) ? T : undefined,
+    });
   };
   // params in constructor order (cond first) for the sweep
-  VENEER_OPS.push({ ns: T.name, name: "select", params: [bool, T, T], results: [T], entry: SELECT_ENTRY });
+  VENEER_OPS.push({ ns: T.name, name: "select", params: [bool, T, T], results: [T], entry: SELECT_ENTRY, mem: isRef(T) ? "ref" : undefined });
 }
-for (const T of [bool, s32, u32, s64, u64, f32, f64]) defSelect(T);
+for (const T of [bool, s32, u32, s64, u64, f32, f64, funcref, externref]) defSelect(T);
 
 // --- bulk memory operations (surfaced as methods on the memory/data handles) --
 
@@ -445,8 +474,99 @@ export const MEMORY_OPS = {
   },
 };
 
-// Register the handle-method instructions for sweep coverage (mem: "bulk"
-// marks them as not directly constructible from a namespace).
+// --- table operations (surfaced as methods on the table/elem handles) ---------
+
+function checkTableHandle(tbl, what) {
+  const b = requireBuilder(what);
+  if (tbl?.handleKind !== "table") fail(`${what}: expected a table handle`);
+  if (tbl.module !== b.module) fail(`${what}: table belongs to a different module`);
+  return b;
+}
+
+function checkElemHandle(seg, module, what) {
+  if (seg?.handleKind !== "elem") fail(`${what}: expected an element segment handle`);
+  if (seg.module !== module) fail(`${what}: element segment belongs to a different module`);
+}
+
+const tblOp = (name) => entryOf(`table.${name}`);
+
+/** Implementations behind TableHandle/ElemSegment methods (module.js delegates here). */
+export const TABLE_OPS = {
+  get(tbl, index) {
+    checkTableHandle(tbl, "tbl.get()");
+    const i = resolveInt32(index, "tbl.get() index");
+    return makeNode("op", { results: [tbl.elemType], entry: tblOp("get"), operands: [i], table: tbl, display: "tbl.get()" });
+  },
+  set(tbl, index, value) {
+    checkTableHandle(tbl, "tbl.set()");
+    const i = resolveInt32(index, "tbl.set() index");
+    const v = resolveOperand(value, tbl.elemType, "tbl.set() value");
+    makeNode("op", { results: [], entry: tblOp("set"), operands: [i, v], table: tbl, display: "tbl.set()" }, { anchor: true });
+  },
+  size(tbl) {
+    checkTableHandle(tbl, "tbl.size()");
+    return makeNode("op", { results: [u32], entry: tblOp("size"), operands: [], table: tbl, display: "tbl.size()" });
+  },
+  grow(tbl, delta, init) {
+    checkTableHandle(tbl, "tbl.grow()");
+    const d = resolveInt32(delta, "tbl.grow() delta");
+    const v = init === undefined ? tbl.elemType.null() : resolveOperand(init, tbl.elemType, "tbl.grow() init");
+    // wasm stack order: init value, then delta
+    return makeNode("op", { results: [u32], entry: tblOp("grow"), operands: [v, d], table: tbl, display: "tbl.grow()" });
+  },
+  fill(tbl, start, value, len) {
+    checkTableHandle(tbl, "tbl.fill()");
+    const operands = [
+      resolveInt32(start, "tbl.fill() start"),
+      resolveOperand(value, tbl.elemType, "tbl.fill() value"),
+      resolveInt32(len, "tbl.fill() length"),
+    ];
+    makeNode("op", { results: [], entry: tblOp("fill"), operands, table: tbl, display: "tbl.fill()" }, { anchor: true });
+  },
+  copy(tbl, dst, src, len, opts = {}) {
+    checkTableHandle(tbl, "tbl.copy()");
+    const from = opts.from ?? tbl;
+    if (from.handleKind !== "table" || from.module !== tbl.module) {
+      fail("tbl.copy(): `from` must be a table handle from this module");
+    }
+    if (from.elemType !== tbl.elemType) {
+      fail(`tbl.copy(): element types must match (${tbl.elemType.name} vs ${from.elemType.name})`);
+    }
+    const operands = [
+      resolveInt32(dst, "tbl.copy() destination"),
+      resolveInt32(src, "tbl.copy() source"),
+      resolveInt32(len, "tbl.copy() length"),
+    ];
+    makeNode("op", { results: [], entry: tblOp("copy"), operands, table: tbl, srcTable: from, display: "tbl.copy()" }, { anchor: true });
+  },
+  init(tbl, seg, dst, src, len) {
+    const b = checkTableHandle(tbl, "tbl.init()");
+    checkElemHandle(seg, b.module, "tbl.init()");
+    if (tbl.elemType !== funcref) fail("tbl.init(): element segments hold funcref — the table must be funcref-typed");
+    const operands = [
+      resolveInt32(dst, "tbl.init() destination"),
+      resolveInt32(src, "tbl.init() source offset"),
+      resolveInt32(len, "tbl.init() length"),
+    ];
+    makeNode(
+      "op",
+      { results: [], entry: tblOp("init"), operands, table: tbl, segment: seg, display: "tbl.init()" },
+      { anchor: true },
+    );
+  },
+  dropElem(seg) {
+    const b = requireBuilder("seg.drop()");
+    checkElemHandle(seg, b.module, "seg.drop()");
+    makeNode(
+      "op",
+      { results: [], entry: entryOf("elem.drop"), operands: [], segment: seg, display: "seg.drop()" },
+      { anchor: true },
+    );
+  },
+};
+
+// Register the handle-method instructions for sweep coverage (a truthy `mem`
+// marks them as not directly constructible/executable from a namespace).
 for (const [ns, name, params, results] of [
   ["memory", "size", [], [u32]],
   ["memory", "grow", [u32], [u32]],
@@ -454,6 +574,14 @@ for (const [ns, name, params, results] of [
   ["memory", "copy", [u32, u32, u32], []],
   ["memory", "init", [u32, u32, u32], []],
   ["data", "drop", [], []],
+  ["table", "get", [u32], [funcref]],
+  ["table", "set", [u32, funcref], []],
+  ["table", "size", [], [u32]],
+  ["table", "grow", [funcref, u32], [u32]],
+  ["table", "fill", [u32, funcref, u32], []],
+  ["table", "copy", [u32, u32, u32], []],
+  ["table", "init", [u32, u32, u32], []],
+  ["elem", "drop", [], []],
 ]) {
   VENEER_OPS.push({ ns, name, params, results, entry: entryOf(`${ns}.${name}`), mem: "bulk" });
 }
@@ -517,4 +645,4 @@ export function promoteConst(node, target) {
   return target.const(v);
 }
 
-export { s32, u32, s64, u64, f32, f64, bool };
+export { s32, u32, s64, u64, f32, f64, bool, funcref, externref };

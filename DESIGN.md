@@ -249,6 +249,36 @@ of blocks — conditional values are written to locals in each arm, or use
   released with `seg.drop()` (both statements). The data-count section is
   emitted automatically whenever segments exist.
 
+### References and tables
+
+- **`funcref` and `externref` are value types** (null is their zero-init).
+  wasm 2.0 gives references almost no operations, and the namespaces reflect
+  that: `T.null()` (a const-expr, valid in initializers), `T.is_null(x)` →
+  `bool`, and `T.select` (emitting the typed-select encoding). No equality,
+  no casts, never in linear memory; promotion and permissive mode ignore
+  them entirely.
+- **`fn.ref()`** turns any function handle (defined or imported) into a
+  first-class `funcref` — also a const-expr, so `mod.variable(funcref,
+  fn.ref())` works. The spec's ref.func declaration requirement is satisfied
+  by an auto-generated hidden declarative element segment.
+- **Tables**: `mod.table(elemType, { min, max? })` — funcref or externref,
+  limits in elements, multiple tables allowed, `.import()`/`.export()` chain.
+  Handle methods mirror memory: `get`/`set`, `size()`/`grow(delta, init =
+  null)` (u32), `fill(start, ref, len)`, `copy(dst, src, len, { from? })`
+  (cross-table via the options bag; element types must match), and
+  `init(seg, …)`. Indices are sign-agnostic 32-bit positions.
+- **Indirect calls**: `mod.funcType(params, results)` declares a reusable
+  signature (interned into the type section); `tbl.call(type, index,
+  ...args)` performs `call_indirect` with eager arg checking and fn.call's
+  result rules (0 → statement, 1 → node, n → tuple). Runtime traps on
+  OOB/null/signature mismatch are wasm's own. A funcType is also accepted by
+  `mod.function(type)` so signature families are single-sourced.
+- **Element segments mirror data segments**: `mod.elem([f, null, g])` (items:
+  function handles or null) is passive by default; `.at(table, offset)` pins
+  it active (funcref tables only); `tbl.init(seg, dst, src, len)` and
+  `seg.drop()` at runtime. The encoding flavor (plain/expression vector,
+  table index, declarative) is chosen automatically.
+
 ### Safe promotion (default) and permissive mode
 
 - **Safe promotion is core semantics, not a mode.** The consuming op's
@@ -300,11 +330,6 @@ The following are recognized but **must not be implemented until the API is
 discussed and locked down** in a future planning session. Nothing in the core
 may assume a shape for these beyond what's noted here.
 
-- **Tables & indirect calls** — table handles, `call_indirect` (explicit
-  signature at the call site), `table.*` instructions, element segments
-  (active/passive/declared).
-- **Reference types as values** — `funcref`/`externref` variables and params,
-  `ref.func` / `ref.null` / `ref.is_null`, typed `select` for references.
 - **SIMD (`v128`)** — in the Wasm 2.0 spec but explicitly descoped; the opcode
   table absorbs it later without design changes.
 - Already out of spec scope (no design needed yet): GC types, exception

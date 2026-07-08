@@ -38,13 +38,21 @@ export const s64 = new ValType("s64", 0x7e, 0n, i64);
 export const u64 = new ValType("u64", 0x7e, 0n, i64);
 export const bool = new ValType("bool", 0x7f, false, i32);
 
+// Reference types (their own storage; null is the zero value).
+export const funcref = new ValType("funcref", 0x70, null);
+export const externref = new ValType("externref", 0x6f, null);
+
 /** Storage types in canonical local-pool order. */
-export const valtypes = [i32, i64, f32, f64];
+export const valtypes = [i32, i64, f32, f64, funcref, externref];
+
+export function isRef(t) {
+  return t === funcref || t === externref;
+}
 
 /** @returns {ValType} */
 export function checkValType(x, what) {
   if (!(x instanceof ValType) || x === i32 || x === i64) {
-    fail(`${what}: expected a value type (s32, u32, s64, u64, f32, f64, bool), got ${describe(x)}`);
+    fail(`${what}: expected a value type (s32, u32, s64, u64, f32, f64, bool, funcref, externref), got ${describe(x)}`);
   }
   return x;
 }
