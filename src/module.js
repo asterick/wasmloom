@@ -6,7 +6,7 @@ import { Variable } from "./variable.js";
 import { FunctionBuilder } from "./builder.js";
 import { encodeModule } from "./encode/encoder.js";
 import { MEMORY_OPS, TABLE_OPS, promoteConst, defaultInit, resolveInt32 } from "./expr.js";
-import { funcref, externref, isRef } from "./types.js";
+import { funcref, externref, isRef, isVec } from "./types.js";
 
 /** Handle for a declared function. Declare first; attach `.body()` or `.import()` later. */
 export class FunctionHandle {
@@ -521,6 +521,9 @@ function resolveModuleInit(type, init) {
   if (init === null && isRef(type)) return { kind: "const", node: type.null() };
   if (typeof init === "number" || typeof init === "bigint" || typeof init === "boolean") {
     return { kind: "const", node: type.const(init) };
+  }
+  if (Array.isArray(init) && isVec(type) && type.const) {
+    return { kind: "const", node: type.const(init) }; // lane values, like scalar JS inits
   }
   if (init instanceof Node) {
     if (init.kind === "reffunc") {

@@ -1,6 +1,9 @@
 import { fail } from "./errors.js";
 import { OPTABLE } from "./optable.js";
-import { i32 as I32, i64 as I64, f32, f64, s32, u32, s64, u64, bool, funcref, externref, isRef } from "./types.js";
+import {
+  i32 as I32, i64 as I64, f32, f64, s32, u32, s64, u64, bool, funcref, externref, isRef, isVec,
+  s8x16, u8x16, s16x8, u16x8, s32x4, u32x4, s64x2, u64x2, f32x4, f64x2, m8x16, m16x8, m32x4, m64x2,
+} from "./types.js";
 import { makeNode, resolveOperand, setCoercion } from "./node.js";
 import { requireBuilder } from "./context.js";
 
@@ -375,6 +378,7 @@ buildRefNamespace(externref);
 
 /** Zero-initialization value for a type: null for references, zero otherwise. */
 export function defaultInit(type) {
+  if (isVec(type)) return makeNode("const", { type, results: [type], value: new Uint8Array(16) });
   return isRef(type) ? type.null() : type.const(type.zero);
 }
 
@@ -403,6 +407,280 @@ function defSelect(T) {
   VENEER_OPS.push({ ns: T.name, name: "select", params: [bool, T, T], results: [T], entry: SELECT_ENTRY, mem: isRef(T) ? "ref" : undefined });
 }
 for (const T of [bool, s32, u32, s64, u64, f32, f64, funcref, externref]) defSelect(T);
+
+// --- SIMD: lane namespaces over v128 -------------------------------------------
+// Lane namespaces carry signedness like the scalar types (s8x16.gt → i8x16.gt_s);
+// comparisons produce mask types (m8x16 … m64x2), bitselect requires a
+// shape-matched mask, and all v128 views retype into each other via `cast`.
+// v128 never crosses the JS boundary and has no promotions — barriers are
+// crossed only by explicit `cast`/conversions.
+
+const VEC_TYPES = [s8x16, u8x16, s16x8, u16x8, s32x4, u32x4, s64x2, u64x2, f32x4, f64x2, m8x16, m16x8, m32x4, m64x2];
+const MASK_BY_LANES = new Map([[16, m8x16], [8, m16x8], [4, m32x4], [2, m64x2]]);
+const LANE_SCALAR = new Map([
+  [s8x16, s32], [u8x16, u32], [s16x8, s32], [u16x8, u32],
+  [s32x4, s32], [u32x4, u32], [s64x2, s64], [u64x2, u64],
+  [f32x4, f32], [f64x2, f64],
+]);
+const V = (n) => entryOf(`v128.${n}`);
+const VEC_VENEER_START = VENEER_OPS.length;
+
+function defVecConst(T) {
+  const { lanes, laneBits } = T;
+  const signed = T.name[0] === "s";
+  const float = T.name[0] === "f";
+  T.const = function (vals) {
+    if (!Array.isArray(vals) || vals.length !== lanes) {
+      fail(`${T.name}.const: expected an array of ${lanes} lane values`);
+    }
+    const bytes = new Uint8Array(16);
+    const view = new DataView(bytes.buffer);
+    vals.forEach((v, i) => {
+      const what = `${T.name}.const lane ${i}`;
+      if (float) {
+        if (typeof v !== "number") fail(`${what}: expected a number, got ${typeof v}`);
+        if (laneBits === 32) view.setFloat32(i * 4, v, true);
+        else view.setFloat64(i * 8, v, true);
+      } else if (laneBits === 64) {
+        let big;
+        if (typeof v === "bigint") big = v;
+        else if (typeof v === "number" && Number.isSafeInteger(v)) big = BigInt(v);
+        else fail(`${what}: expected a BigInt or safe integer, got ${typeof v === "number" ? v : typeof v}`);
+        const [lo, hi] = signed ? [-(2n ** 63n), 2n ** 63n - 1n] : [0n, 2n ** 64n - 1n];
+        if (big < lo || big > hi) fail(`${what}: ${big} is outside [${lo}, ${hi}]`);
+        view.setBigUint64(i * 8, BigInt.asUintN(64, big), true);
+      } else {
+        if (typeof v !== "number" || !Number.isInteger(v)) {
+          fail(`${what}: expected an integer, got ${typeof v === "number" ? v : typeof v}`);
+        }
+        const [lo, hi] = signed
+          ? [-(2 ** (laneBits - 1)), 2 ** (laneBits - 1) - 1]
+          : [0, 2 ** laneBits - 1];
+        if (v < lo || v > hi) fail(`${what}: ${v} is outside [${lo}, ${hi}]`);
+        if (laneBits === 8) view.setUint8(i, v & 0xff);
+        else if (laneBits === 16) view.setUint16(i * 2, v & 0xffff, true);
+        else view.setUint32(i * 4, v >>> 0, true);
+      }
+    });
+    return makeNode("const", { type: T, results: [T], value: bytes });
+  };
+}
+
+function checkLaneIndex(lane, count, what) {
+  if (!Number.isInteger(lane) || lane < 0 || lane >= count) {
+    fail(`${what}: lane index must be an integer in [0, ${count}), got ${lane}`);
+  }
+}
+
+function defExtract(T, entry, scalar) {
+  const display = `${T.name}.extract`;
+  T.extract = function (x, lane) {
+    const v = resolveOperand(x, T, `${display} operand`);
+    checkLaneIndex(lane, T.lanes, display);
+    return makeNode("op", { results: [scalar], entry, operands: [v], lane, display });
+  };
+  VENEER_OPS.push({ ns: T.name, name: "extract", params: [T], results: [scalar], entry, laneCount: T.lanes });
+}
+
+function defReplace(T, entry, scalar) {
+  const display = `${T.name}.replace`;
+  T.replace = function (x, lane, value) {
+    const v = resolveOperand(x, T, `${display} operand`);
+    checkLaneIndex(lane, T.lanes, display);
+    const s = resolveOperand(value, scalar, `${display} value`);
+    return makeNode("op", { results: [T], entry, operands: [v, s], lane, display });
+  };
+  VENEER_OPS.push({ ns: T.name, name: "replace", params: [T, scalar], results: [T], entry, laneCount: T.lanes });
+}
+
+function defShuffle(T) {
+  const entry = entryOf("i8x16.shuffle");
+  const display = `${T.name}.shuffle`;
+  T.shuffle = function (a, b, lanes) {
+    const va = resolveOperand(a, T, `${display} first operand`);
+    const vb = resolveOperand(b, T, `${display} second operand`);
+    if (!Array.isArray(lanes) || lanes.length !== 16) {
+      fail(`${display}: expected an array of 16 lane indices`);
+    }
+    for (const l of lanes) {
+      if (!Number.isInteger(l) || l < 0 || l > 31) {
+        fail(`${display}: lane indices select from both operands' 32 bytes — each must be in [0, 32), got ${l}`);
+      }
+    }
+    return makeNode("op", { results: [T], entry, operands: [va, vb], lanes: Uint8Array.from(lanes), display });
+  };
+  VENEER_OPS.push({ ns: T.name, name: "shuffle", params: [T, T], results: [T], entry, shuffle: true });
+}
+
+function defLaneMem(T, name, entry) {
+  const display = `${T.name}.${name}`;
+  const isLoad = entry.mem === "load";
+  T[name] = function (mem, addr, value, lane, opts = {}) {
+    const memarg = checkMemArgs(mem, opts, entry, display);
+    const a = resolveInt32(addr, `${display} address`);
+    const v = resolveOperand(value, T, `${display} vector`);
+    checkLaneIndex(lane, T.lanes, display);
+    return makeNode(
+      "op",
+      { results: isLoad ? [T] : [], entry, operands: [a, v], mem, memarg, lane, display },
+      { anchor: !isLoad },
+    );
+  };
+  VENEER_OPS.push({
+    ns: T.name, name, params: [T], results: isLoad ? [T] : [], entry, mem: entry.mem, laneCount: T.lanes,
+  });
+}
+
+function buildVecBitwise(T) {
+  defOp(T, "and", V("and"), [T, T], [T]);
+  defOp(T, "or", V("or"), [T, T], [T]);
+  defOp(T, "xor", V("xor"), [T, T], [T]);
+  defOp(T, "andnot", V("andnot"), [T, T], [T]);
+  defOp(T, "not", V("not"), [T], [T]);
+}
+
+function buildVecMem(T) {
+  defOp(T, "load", V("load"), [ANY32], [T]);
+  defOp(T, "store", V("store"), [ANY32, T], []);
+  defOp(T, "load_splat", V(`load${T.laneBits}_splat`), [ANY32], [T]);
+  if (T.laneBits >= 32) defOp(T, "load_zero", V(`load${T.laneBits}_zero`), [ANY32], [T]);
+  defLaneMem(T, "load_lane", V(`load${T.laneBits}_lane`));
+  defLaneMem(T, "store_lane", V(`store${T.laneBits}_lane`));
+}
+
+// Half-width source type for the widening families (extend/extmul/extadd),
+// following the namespace's signedness.
+const HALF = new Map([
+  [s16x8, s8x16], [u16x8, u8x16],
+  [s32x4, s16x8], [u32x4, u16x8],
+  [s64x2, s32x4], [u64x2, u32x4],
+]);
+
+function buildVecIntNamespace(T, shape, signed) {
+  const sfx = signed ? "_s" : "_u";
+  const e = (n) => entryOf(`${shape}.${n}`);
+  const M = MASK_BY_LANES.get(T.lanes);
+  const scalar = LANE_SCALAR.get(T);
+  const bits = T.laneBits;
+
+  defVecConst(T);
+  defOp(T, "splat", e("splat"), [scalar], [T]);
+  defExtract(T, e(bits <= 16 ? `extract_lane${sfx}` : "extract_lane"), scalar);
+  defReplace(T, e("replace_lane"), scalar);
+
+  defOp(T, "eq", e("eq"), [T, T], [M]);
+  defOp(T, "ne", e("ne"), [T, T], [M]);
+  if (bits < 64 || signed) {
+    // wasm has no unsigned 64-lane ordering — u64x2 gets only eq/ne
+    for (const n of ["lt", "gt", "le", "ge"]) defOp(T, n, e(n + sfx), [T, T], [M]);
+  }
+
+  defOp(T, "add", e("add"), [T, T], [T]);
+  defOp(T, "sub", e("sub"), [T, T], [T]);
+  defOp(T, "neg", e("neg"), [T], [T]);
+  if (bits >= 16) defOp(T, "mul", e("mul"), [T, T], [T]);
+  if (signed) defOp(T, "abs", e("abs"), [T], [T]);
+  defOp(T, "shl", e("shl"), [T, ANY32], [T]);
+  defOp(T, "shr", e(`shr${sfx}`), [T, ANY32], [T]);
+  buildVecBitwise(T);
+  defOp(T, "bitselect", V("bitselect"), [T, T, M], [T]);
+  if (bits <= 16) {
+    defOp(T, "add_sat", e(`add_sat${sfx}`), [T, T], [T]);
+    defOp(T, "sub_sat", e(`sub_sat${sfx}`), [T, T], [T]);
+  }
+  if (bits <= 32) {
+    defOp(T, "min", e(`min${sfx}`), [T, T], [T]);
+    defOp(T, "max", e(`max${sfx}`), [T, T], [T]);
+  }
+  if (bits <= 16 && !signed) defOp(T, "avgr", e("avgr_u"), [T, T], [T]);
+  if (bits === 8) {
+    defOp(T, "popcnt", e("popcnt"), [T], [T]);
+    defOp(T, "swizzle", e("swizzle"), [T, T], [T]);
+    defShuffle(T);
+  }
+  if (T === s16x8) defOp(T, "q15mulr_sat", e("q15mulr_sat_s"), [T, T], [T]);
+  if (T === s32x4) defOp(T, "dot", e("dot_i16x8_s"), [s16x8, s16x8], [T]);
+
+  const src = HALF.get(T);
+  if (src) {
+    const srcShape = `i${src.laneBits}x${src.lanes}`;
+    defOp(T, "extend_low", e(`extend_low_${srcShape}${sfx}`), [src], [T]);
+    defOp(T, "extend_high", e(`extend_high_${srcShape}${sfx}`), [src], [T]);
+    defOp(T, "extmul_low", e(`extmul_low_${srcShape}${sfx}`), [src, src], [T]);
+    defOp(T, "extmul_high", e(`extmul_high_${srcShape}${sfx}`), [src, src], [T]);
+    if (bits <= 32) defOp(T, "extadd_pairwise", e(`extadd_pairwise_${srcShape}${sfx}`), [src], [T]);
+    defOp(T, `load${bits / 2}x${T.lanes}`, V(`load${bits / 2}x${T.lanes}${sfx}`), [ANY32], [T]);
+  }
+  if (bits <= 16) {
+    // narrow saturates SIGNED wider lanes; the namespace picks the treatment
+    const wideSrc = bits === 8 ? s16x8 : s32x4;
+    defOp(T, "narrow", e(`narrow_i${bits * 2}x${T.lanes / 2}${sfx}`), [wideSrc, wideSrc], [T]);
+  }
+  if (T === s32x4 || T === u32x4) {
+    defConversion(T, "trunc_sat", [{ from: f32x4, entry: e(`trunc_sat_f32x4${sfx}`) }]);
+    defConversion(T, "trunc_sat_zero", [{ from: f64x2, entry: e(`trunc_sat_f64x2${sfx}_zero`) }]);
+  }
+  buildVecMem(T);
+}
+
+function buildVecFloatNamespace(T, shape) {
+  const e = (n) => entryOf(`${shape}.${n}`);
+  const M = MASK_BY_LANES.get(T.lanes);
+  const scalar = LANE_SCALAR.get(T);
+
+  defVecConst(T);
+  defOp(T, "splat", e("splat"), [scalar], [T]);
+  defExtract(T, e("extract_lane"), scalar);
+  defReplace(T, e("replace_lane"), scalar);
+  for (const n of ["eq", "ne", "lt", "gt", "le", "ge"]) defOp(T, n, e(n), [T, T], [M]);
+  for (const n of ["abs", "neg", "sqrt", "ceil", "floor", "trunc", "nearest"]) defOp(T, n, e(n), [T], [T]);
+  for (const n of ["add", "sub", "mul", "div", "min", "max", "pmin", "pmax"]) defOp(T, n, e(n), [T, T], [T]);
+  defOp(T, "bitselect", V("bitselect"), [T, T, M], [T]);
+  if (T === f32x4) {
+    defConversion(T, "convert", [
+      { from: s32x4, entry: e("convert_i32x4_s") },
+      { from: u32x4, entry: e("convert_i32x4_u") },
+    ]);
+    defConversion(T, "demote_zero", [{ from: f64x2, entry: e("demote_f64x2_zero") }]);
+  } else {
+    defConversion(T, "convert_low", [
+      { from: s32x4, entry: e("convert_low_i32x4_s") },
+      { from: u32x4, entry: e("convert_low_i32x4_u") },
+    ]);
+    defConversion(T, "promote_low", [{ from: f32x4, entry: e("promote_low_f32x4") }]);
+  }
+  buildVecMem(T);
+}
+
+function buildMaskNamespace(M, shape) {
+  buildVecBitwise(M);
+  defOp(M, "any_true", V("any_true"), [M], [bool]);
+  defOp(M, "all_true", entryOf(`${shape}.all_true`), [M], [bool]);
+  defOp(M, "bitmask", entryOf(`${shape}.bitmask`), [M], [u32]);
+}
+
+buildVecIntNamespace(s8x16, "i8x16", true);
+buildVecIntNamespace(u8x16, "i8x16", false);
+buildVecIntNamespace(s16x8, "i16x8", true);
+buildVecIntNamespace(u16x8, "i16x8", false);
+buildVecIntNamespace(s32x4, "i32x4", true);
+buildVecIntNamespace(u32x4, "i32x4", false);
+buildVecIntNamespace(s64x2, "i64x2", true);
+buildVecIntNamespace(u64x2, "i64x2", false);
+buildVecFloatNamespace(f32x4, "f32x4");
+buildVecFloatNamespace(f64x2, "f64x2");
+buildMaskNamespace(m8x16, "i8x16");
+buildMaskNamespace(m16x8, "i16x8");
+buildMaskNamespace(m32x4, "i32x4");
+buildMaskNamespace(m64x2, "i64x2");
+
+// Every v128 view retypes into every other at zero cost — reinterpretation
+// is free at the storage level (there is no wasm instruction to select).
+for (const T of VEC_TYPES) defCast(T, VEC_TYPES.filter((x) => x !== T));
+
+// Vector constructors can't round-trip scalars across the JS boundary; the
+// dedicated SIMD sweep exercises them through linear memory instead.
+for (let i = VEC_VENEER_START; i < VENEER_OPS.length; i++) VENEER_OPS[i].vec = true;
 
 // --- bulk memory operations (surfaced as methods on the memory/data handles) --
 
@@ -645,4 +923,7 @@ export function promoteConst(node, target) {
   return target.const(v);
 }
 
-export { s32, u32, s64, u64, f32, f64, bool, funcref, externref };
+export {
+  s32, u32, s64, u64, f32, f64, bool, funcref, externref,
+  s8x16, u8x16, s16x8, u16x8, s32x4, u32x4, s64x2, u64x2, f32x4, f64x2, m8x16, m16x8, m32x4, m64x2,
+};

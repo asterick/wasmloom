@@ -254,6 +254,7 @@ function writeConst(s, node) {
     case "i64": s.u8(OPS.i64_const).s64(node.value); break;
     case "f32": s.u8(OPS.f32_const).f32(node.value); break;
     case "f64": s.u8(OPS.f64_const).f64(node.value); break;
+    case "v128": s.bytes(OPS.v128_const).bytes(node.value); break; // value: 16 bytes LE
     case "funcref":
     case "externref":
       s.u8(OPS.ref_null).u8(node.type.code);
@@ -390,9 +391,12 @@ function writeItem(w, item, slotOf) {
           case "table+table": w.u32(item.table.index).u32(item.srcTable.index); break;
           case "elem": w.u32(item.segment.index); break;
           case "elem+table": w.u32(item.segment.index).u32(item.table.index); break;
+          case "shuffle": w.bytes(item.lanes); break; // 16 lane indices
           default: break; // no immediates
         }
       }
+      // laneidx immediate follows the memarg on lane loads/stores
+      if (item.entry.lane !== undefined) w.u8(item.lane);
       break;
     case "call": w.u8(OPS.call).u32(item.fn.index); break;
     case "call_indirect": w.u8(OPS.call_indirect).u32(item.type.typeIndex).u32(item.table.index); break;

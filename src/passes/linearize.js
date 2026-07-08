@@ -117,6 +117,8 @@ export function linearize(builder, cfg) {
                 table: node.table,
                 srcTable: node.srcTable,
                 selectType: node.selectType,
+                lane: node.lane,
+                lanes: node.lanes,
               });
               break;
             case "call":

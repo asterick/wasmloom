@@ -291,7 +291,7 @@ function same(actual, expected) {
 }
 
 test("every public constructor selects and executes its spec instruction", async () => {
-  const items = VENEER_OPS.filter((v) => !v.mem);
+  const items = VENEER_OPS.filter((v) => !v.mem && !v.vec);
   const mod = new Module();
   const nameOf = (v) => `${v.ns}.${v.name}(${v.params.map((p) => p.name).join(",")})`;
   for (const v of items) {

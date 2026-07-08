@@ -9,7 +9,7 @@ toolchain; emits binary `.wasm` bytes directly.
 |---|---|
 | API style | Hybrid: expression objects for values, statement context (`$`) for effects/control flow |
 | Output | Binary `.wasm` bytes (`Uint8Array`) |
-| Spec target | Wasm 2.0 baseline: multi-value, bulk memory, reference types, sign-extension, nontrapping conversions |
+| Spec target | Wasm 2.0 baseline: multi-value, bulk memory, reference types, sign-extension, nontrapping conversions, fixed-width SIMD |
 | Validation | Eager — type errors throw at the builder call that caused them |
 | Declarations | Handles: declare first, attach bodies later (forward decls, mutual recursion) |
 | Imports | Chained on the same declaration: `.import(module, name)` — exactly one of body/init or import |
@@ -27,6 +27,9 @@ toolchain; emits binary `.wasm` bytes directly.
 | Consts | Range-checked per namespace: `s32.const` in [-2^31, 2^31), `u32.const` in [0, 2^32), etc.; `f32.const` rounds |
 | Safe promotion | Default behavior: operands lift value-exactly into an op's namespace type (s32/u32/bool→s64, u32/bool→u64, f32/s32/u32/bool→f64, bool→s32/u32/f32) — the namespace names the target explicitly, so nothing implicit is guarded. Lossy/narrowing always errors |
 | Permissive mode | `permissive: true` (opt-in, never default in tests) — bit-level leniency within a storage width: integer conditions, mixed signedness retypes, integers in bool positions get a real ≠0 test |
+| SIMD lanes | Lane namespaces follow signedness: `s8x16`/`u8x16`/`s16x8`/`u16x8`/`s32x4`/`u32x4`/`s64x2`/`u64x2`/`f32x4`/`f64x2`, all views over one v128 storage. Suffix-less names select variants (`u8x16.shr` → `i8x16.shr_u`); widening/narrowing families follow the namespace (`s32x4.extend_low(s16x8)`) |
+| SIMD masks | Comparisons produce dedicated mask types (`m8x16`/`m16x8`/`m32x4`/`m64x2`) — the SIMD analog of `bool`. `bitselect` requires a shape-matched mask; `any_true`/`all_true` (→ `bool`) and `bitmask` (→ `u32`) live on masks. Masks are not data and not conditions |
+| SIMD v128 ops | Lane-agnostic instructions (bitwise, `bitselect`, plain load/store) appear on every integer lane namespace and mask — no bare `v128` type in the public API. Every v128 view retypes into any other via zero-cost `cast` (the universal bridge; there is no wasm instruction to select). Floats keep the scalar discipline: no bitwise ops without casting to an integer view |
 | Diagnostics | `new Module({ debug: true })` captures creation stack traces for emit-time errors |
 | Types | Plain JS with JSDoc annotations |
 | Testing | Round-trip: instantiate output with V8 (`node --test`), assert executed results |
@@ -248,6 +251,36 @@ of blocks — conditional values are written to locals in each arm, or use
   released with `seg.drop()` (both statements). The data-count section is
   emitted automatically whenever segments exist.
 
+### SIMD (v128 lane namespaces)
+
+Ten lane views and four mask types over one 128-bit storage; the full
+scalar discipline extends lane-wise. Signedness lives in the namespace
+(`u16x8.shr` → `i16x8.shr_u`, `s8x16.extract` sign-extends), comparisons
+produce masks, and `cast` retypes any v128 view into any other for free.
+
+```js
+import { s32x4, f32x4, m32x4, u8x16 } from "wasmemit";
+
+const v = s32x4.load(mem, addr);                  // lane types load/store directly
+const clamped = s32x4.bitselect(limit, v, s32x4.gt(v, limit)); // mask-typed select
+$.if(m32x4.any_true(s32x4.lt(v, s32x4.const([0, 0, 0, 0]))), ($) => { /* … */ });
+const bytes = u8x16.cast(v);                      // zero-cost view change
+```
+
+- `t.const([...lanes])` range-checks per lane signedness (BigInt for 64-bit
+  lanes); `splat`/`extract`/`replace` use the matching scalar type; lane
+  indices and `shuffle` patterns are immediates, range-checked eagerly.
+- Memory: `load`/`store`, `load_splat`, `load_zero` (32/64-bit lanes), wide
+  loads (`s16x8.load8x8`, `s32x4.load16x4`, `s64x2.load32x2`), and
+  `load_lane`/`store_lane` — all with the scalar `{align, offset}` options.
+- Widening families are operand-driven and signedness-consistent:
+  `narrow` (saturating, takes signed sources), `extend_low/high`,
+  `extadd_pairwise`, `extmul_low/high`, `trunc_sat`/`trunc_sat_zero`,
+  `convert`/`convert_low`, `demote_zero`/`promote_low`, `s32x4.dot`.
+- Module and local variables hold vectors (`mod.variable(s32x4, [1, 2, 3, 4])`
+  accepts lane arrays); v128 never crosses the JS boundary, so exported
+  signatures must stay scalar.
+
 ### References and tables
 
 - **`funcref` and `externref` are value types** (null is their zero-init).
@@ -329,8 +362,6 @@ The following are recognized but **must not be implemented until the API is
 discussed and locked down** in a future planning session. Nothing in the core
 may assume a shape for these beyond what's noted here.
 
-- **SIMD (`v128`)** — in the Wasm 2.0 spec but explicitly descoped; the opcode
-  table absorbs it later without design changes.
 - Already out of spec scope (no design needed yet): GC types, exception
   handling, threads/atomics, tail calls, multi-memory, memory64.
 

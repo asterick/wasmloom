@@ -6,8 +6,8 @@ State snapshot for picking this project back up. Last updated: 2026-07-08.
 
 A JavaScript library for generating WebAssembly binaries via expression
 builders — no external toolchain, `mod.emit()` → `Uint8Array`. The whole
-Wasm 2.0 surface is implemented **except SIMD**. 171 tests, all passing
-(`npm test`, Node ≥ 18, zero dependencies).
+Wasm 2.0 surface is implemented, **including fixed-width SIMD**. 182 tests,
+all passing (`npm test`, Node ≥ 18, zero dependencies).
 
 **`DESIGN.md` is the contract.** Every API shape in it was explicitly
 ratified in planning discussions with Bryon. Do not implement new
@@ -36,8 +36,9 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
 ```
 
 - `src/types.js` — `ValType`s. Public types (`s32`/`u32`/`s64`/`u64`/`f32`/
-  `f64`/`bool`/`funcref`/`externref`) carry a `wasmType` storage pointer;
-  the pipeline only ever looks at storage.
+  `f64`/`bool`/`funcref`/`externref`, plus ten SIMD lane views
+  `s8x16`…`f64x2` and four mask types `m8x16`…`m64x2` over `v128`) carry a
+  `wasmType` storage pointer; the pipeline only ever looks at storage.
 - `src/optable.js` — the single data-driven instruction table, spec-shaped
   (`i32.div_s`). Adding an instruction here is one line; encoding and
   constructors follow.
@@ -66,6 +67,12 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
   f32/s32/u32/bool→f64, …; never lossy/narrowing). `permissive: true` is
   the only flag-gated leniency and appears ONLY in `test/modes.test.js` —
   never make it ambient in tests.
+- **SIMD discipline**: lane namespaces follow signedness; comparisons
+  produce mask types (`m*`), `bitselect` demands a shape-matched mask,
+  masks are neither data nor conditions; v128 views have NO promotions —
+  `cast` (free retype, any view → any view) is the only bridge. v128 can't
+  cross the JS boundary, so its sweep runs through linear memory
+  (`test/simd-sweep.test.js`).
 - **Invariants**: `emit()` is repeatable and byte-stable (compiled bodies
   are cached on the handle); `debug: true` output is byte-identical;
   zero-result ops auto-anchor as statements; unconsumed call results are
@@ -73,13 +80,19 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
 
 ## Test suite map (`test/*.test.js`)
 
-- `optable-sweep` — every public constructor overload executed against an
-  independent JS reference (~16k cases), plus a coverage check that every
-  optable entry is reachable. New instructions MUST be registered in
-  `VENEER_OPS` or this fails.
+- `optable-sweep` — every public scalar constructor overload executed
+  against an independent JS reference (~16k cases), plus a coverage check
+  that every optable entry is reachable. New instructions MUST be
+  registered in `VENEER_OPS` or this fails.
+- `simd-sweep` — the SIMD analog (~9k cases): every vector overload runs
+  against a lane-wise JS reference, operands routed through linear memory
+  (v128 can't cross the JS boundary). Register vector veneer ops before the
+  `vec`-flag marking loop in expr.js so both sweeps stay partitioned.
 - `fuzz` (CFG/relooper) and `expr-fuzz` (expression semantics) — the two
   differential fuzzers; extend these before hand-writing many cases.
 - `memory-sweep` — all load/store variants vs DataView; bulk-op semantics.
+- `simd` — behavioral: masks end-to-end, shape-barrier errors, casts,
+  v128 variables/globals, lane memory ops, shuffle/swizzle.
 - `irreducible` — crafted multi-entry loops: br_table into a loop, temps
   across split copies, nesting, a complete switch web that deterministically
   exhausts the split budget and exercises the dispatch-loop fallback, and
@@ -91,13 +104,10 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
 
 ## Queue (in priority order)
 
-1. **SIMD (`v128`)** — needs a short design session first (open question:
-   do lane namespaces follow signedness, e.g. `s8x16`/`u8x16`?). Then
-   mechanical: optable entries + veneer registration + sweep references.
-2. **Polish (no design needed)**: `local.tee` peephole (set+get pairs),
+1. **Polish (no design needed)**: `local.tee` peephole (set+get pairs),
    drop synthetic zero-init when a slot is provably fresh, generated
    `.d.ts` from JSDoc.
-3. **Pinned (do not do unless asked)**: custom sections / name section —
+2. **Pinned (do not do unless asked)**: custom sections / name section —
    see DESIGN.md's "Pinned" section.
 
 ## Working conventions

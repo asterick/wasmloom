@@ -222,6 +222,181 @@ op("data", "drop", [0xfc, 0x09], [], [], { imm: "data" });
 op("memory", "copy", [0xfc, 0x0a], ["i32", "i32", "i32"], [], { imm: "mem+mem" });
 op("memory", "fill", [0xfc, 0x0b], ["i32", "i32", "i32"], [], { imm: "mem" });
 
+// --- SIMD (0xFD prefix; sub-opcode is LEB128) ---
+
+function simd(ns, name, subop, params, results, extra) {
+  const bytes = subop < 0x80 ? [subop] : [(subop & 0x7f) | 0x80, subop >> 7];
+  op(ns, name, [0xfd, ...bytes], params, results, extra);
+}
+
+// loads/stores (lane variants carry a lane immediate after the memarg)
+simd("v128", "load", 0, ["i32"], ["v128"], { mem: "load", size: 16 });
+simd("v128", "load8x8_s", 1, ["i32"], ["v128"], { mem: "load", size: 8 });
+simd("v128", "load8x8_u", 2, ["i32"], ["v128"], { mem: "load", size: 8 });
+simd("v128", "load16x4_s", 3, ["i32"], ["v128"], { mem: "load", size: 8 });
+simd("v128", "load16x4_u", 4, ["i32"], ["v128"], { mem: "load", size: 8 });
+simd("v128", "load32x2_s", 5, ["i32"], ["v128"], { mem: "load", size: 8 });
+simd("v128", "load32x2_u", 6, ["i32"], ["v128"], { mem: "load", size: 8 });
+simd("v128", "load8_splat", 7, ["i32"], ["v128"], { mem: "load", size: 1 });
+simd("v128", "load16_splat", 8, ["i32"], ["v128"], { mem: "load", size: 2 });
+simd("v128", "load32_splat", 9, ["i32"], ["v128"], { mem: "load", size: 4 });
+simd("v128", "load64_splat", 10, ["i32"], ["v128"], { mem: "load", size: 8 });
+simd("v128", "store", 11, ["i32", "v128"], [], { mem: "store", size: 16 });
+simd("v128", "load8_lane", 84, ["i32", "v128"], ["v128"], { mem: "load", size: 1, lane: 16 });
+simd("v128", "load16_lane", 85, ["i32", "v128"], ["v128"], { mem: "load", size: 2, lane: 8 });
+simd("v128", "load32_lane", 86, ["i32", "v128"], ["v128"], { mem: "load", size: 4, lane: 4 });
+simd("v128", "load64_lane", 87, ["i32", "v128"], ["v128"], { mem: "load", size: 8, lane: 2 });
+simd("v128", "store8_lane", 88, ["i32", "v128"], [], { mem: "store", size: 1, lane: 16 });
+simd("v128", "store16_lane", 89, ["i32", "v128"], [], { mem: "store", size: 2, lane: 8 });
+simd("v128", "store32_lane", 90, ["i32", "v128"], [], { mem: "store", size: 4, lane: 4 });
+simd("v128", "store64_lane", 91, ["i32", "v128"], [], { mem: "store", size: 8, lane: 2 });
+simd("v128", "load32_zero", 92, ["i32"], ["v128"], { mem: "load", size: 4 });
+simd("v128", "load64_zero", 93, ["i32"], ["v128"], { mem: "load", size: 8 });
+
+// shuffle/swizzle/splat
+simd("i8x16", "shuffle", 13, ["v128", "v128"], ["v128"], { imm: "shuffle" });
+simd("i8x16", "swizzle", 14, ["v128", "v128"], ["v128"]);
+simd("i8x16", "splat", 15, ["i32"], ["v128"]);
+simd("i16x8", "splat", 16, ["i32"], ["v128"]);
+simd("i32x4", "splat", 17, ["i32"], ["v128"]);
+simd("i64x2", "splat", 18, ["i64"], ["v128"]);
+simd("f32x4", "splat", 19, ["f32"], ["v128"]);
+simd("f64x2", "splat", 20, ["f64"], ["v128"]);
+
+// lane access (laneidx immediate; `lane` is the valid count)
+simd("i8x16", "extract_lane_s", 21, ["v128"], ["i32"], { lane: 16 });
+simd("i8x16", "extract_lane_u", 22, ["v128"], ["i32"], { lane: 16 });
+simd("i8x16", "replace_lane", 23, ["v128", "i32"], ["v128"], { lane: 16 });
+simd("i16x8", "extract_lane_s", 24, ["v128"], ["i32"], { lane: 8 });
+simd("i16x8", "extract_lane_u", 25, ["v128"], ["i32"], { lane: 8 });
+simd("i16x8", "replace_lane", 26, ["v128", "i32"], ["v128"], { lane: 8 });
+simd("i32x4", "extract_lane", 27, ["v128"], ["i32"], { lane: 4 });
+simd("i32x4", "replace_lane", 28, ["v128", "i32"], ["v128"], { lane: 4 });
+simd("i64x2", "extract_lane", 29, ["v128"], ["i64"], { lane: 2 });
+simd("i64x2", "replace_lane", 30, ["v128", "i64"], ["v128"], { lane: 2 });
+simd("f32x4", "extract_lane", 31, ["v128"], ["f32"], { lane: 4 });
+simd("f32x4", "replace_lane", 32, ["v128", "f32"], ["v128"], { lane: 4 });
+simd("f64x2", "extract_lane", 33, ["v128"], ["f64"], { lane: 2 });
+simd("f64x2", "replace_lane", 34, ["v128", "f64"], ["v128"], { lane: 2 });
+
+// comparisons (results are lane masks)
+for (const [ns, base] of [["i8x16", 35], ["i16x8", 45], ["i32x4", 55]]) {
+  const names = ["eq", "ne", "lt_s", "lt_u", "gt_s", "gt_u", "le_s", "le_u", "ge_s", "ge_u"];
+  names.forEach((n, i) => simd(ns, n, base + i, ["v128", "v128"], ["v128"]));
+}
+for (const [ns, base] of [["f32x4", 65], ["f64x2", 71]]) {
+  ["eq", "ne", "lt", "gt", "le", "ge"].forEach((n, i) => simd(ns, n, base + i, ["v128", "v128"], ["v128"]));
+}
+["eq", "ne", "lt_s", "gt_s", "le_s", "ge_s"].forEach((n, i) =>
+  simd("i64x2", n, 214 + i, ["v128", "v128"], ["v128"]));
+
+// bitwise (lane-agnostic)
+simd("v128", "not", 77, ["v128"], ["v128"]);
+simd("v128", "and", 78, ["v128", "v128"], ["v128"]);
+simd("v128", "andnot", 79, ["v128", "v128"], ["v128"]);
+simd("v128", "or", 80, ["v128", "v128"], ["v128"]);
+simd("v128", "xor", 81, ["v128", "v128"], ["v128"]);
+simd("v128", "bitselect", 82, ["v128", "v128", "v128"], ["v128"]);
+simd("v128", "any_true", 83, ["v128"], ["i32"]);
+
+// integer lane arithmetic
+function simdInt(ns, base) {
+  // base points at <ns>.abs; fixed offsets follow the spec layout per shape
+  simd(ns, "abs", base, ["v128"], ["v128"]);
+  simd(ns, "neg", base + 1, ["v128"], ["v128"]);
+  simd(ns, "all_true", base + 3, ["v128"], ["i32"]);
+  simd(ns, "bitmask", base + 4, ["v128"], ["i32"]);
+  simd(ns, "shl", base + 11, ["v128", "i32"], ["v128"]);
+  simd(ns, "shr_s", base + 12, ["v128", "i32"], ["v128"]);
+  simd(ns, "shr_u", base + 13, ["v128", "i32"], ["v128"]);
+  simd(ns, "add", base + 14, ["v128", "v128"], ["v128"]);
+  simd(ns, "sub", base + 17, ["v128", "v128"], ["v128"]);
+}
+simdInt("i8x16", 96);
+simdInt("i16x8", 128);
+simdInt("i32x4", 160);
+simdInt("i64x2", 192);
+
+// 8/16-lane saturating add/sub, min/max, avgr
+for (const [ns, base] of [["i8x16", 96], ["i16x8", 128]]) {
+  simd(ns, "add_sat_s", base + 15, ["v128", "v128"], ["v128"]);
+  simd(ns, "add_sat_u", base + 16, ["v128", "v128"], ["v128"]);
+  simd(ns, "sub_sat_s", base + 18, ["v128", "v128"], ["v128"]);
+  simd(ns, "sub_sat_u", base + 19, ["v128", "v128"], ["v128"]);
+  simd(ns, "min_s", base + 22, ["v128", "v128"], ["v128"]);
+  simd(ns, "min_u", base + 23, ["v128", "v128"], ["v128"]);
+  simd(ns, "max_s", base + 24, ["v128", "v128"], ["v128"]);
+  simd(ns, "max_u", base + 25, ["v128", "v128"], ["v128"]);
+  simd(ns, "avgr_u", base + 27, ["v128", "v128"], ["v128"]);
+}
+simd("i8x16", "popcnt", 98, ["v128"], ["v128"]);
+simd("i16x8", "q15mulr_sat_s", 130, ["v128", "v128"], ["v128"]);
+simd("i16x8", "mul", 149, ["v128", "v128"], ["v128"]);
+simd("i32x4", "mul", 181, ["v128", "v128"], ["v128"]);
+simd("i64x2", "mul", 213, ["v128", "v128"], ["v128"]);
+simd("i32x4", "min_s", 182, ["v128", "v128"], ["v128"]);
+simd("i32x4", "min_u", 183, ["v128", "v128"], ["v128"]);
+simd("i32x4", "max_s", 184, ["v128", "v128"], ["v128"]);
+simd("i32x4", "max_u", 185, ["v128", "v128"], ["v128"]);
+simd("i32x4", "dot_i16x8_s", 186, ["v128", "v128"], ["v128"]);
+
+// narrow / extend / extadd / extmul
+simd("i8x16", "narrow_i16x8_s", 101, ["v128", "v128"], ["v128"]);
+simd("i8x16", "narrow_i16x8_u", 102, ["v128", "v128"], ["v128"]);
+simd("i16x8", "narrow_i32x4_s", 133, ["v128", "v128"], ["v128"]);
+simd("i16x8", "narrow_i32x4_u", 134, ["v128", "v128"], ["v128"]);
+simd("i16x8", "extadd_pairwise_i8x16_s", 124, ["v128"], ["v128"]);
+simd("i16x8", "extadd_pairwise_i8x16_u", 125, ["v128"], ["v128"]);
+simd("i32x4", "extadd_pairwise_i16x8_s", 126, ["v128"], ["v128"]);
+simd("i32x4", "extadd_pairwise_i16x8_u", 127, ["v128"], ["v128"]);
+for (const [ns, src, base] of [["i16x8", "i8x16", 135], ["i32x4", "i16x8", 167], ["i64x2", "i32x4", 199]]) {
+  simd(ns, `extend_low_${src}_s`, base, ["v128"], ["v128"]);
+  simd(ns, `extend_high_${src}_s`, base + 1, ["v128"], ["v128"]);
+  simd(ns, `extend_low_${src}_u`, base + 2, ["v128"], ["v128"]);
+  simd(ns, `extend_high_${src}_u`, base + 3, ["v128"], ["v128"]);
+}
+for (const [ns, src, base] of [["i16x8", "i8x16", 156], ["i32x4", "i16x8", 188], ["i64x2", "i32x4", 220]]) {
+  simd(ns, `extmul_low_${src}_s`, base, ["v128", "v128"], ["v128"]);
+  simd(ns, `extmul_high_${src}_s`, base + 1, ["v128", "v128"], ["v128"]);
+  simd(ns, `extmul_low_${src}_u`, base + 2, ["v128", "v128"], ["v128"]);
+  simd(ns, `extmul_high_${src}_u`, base + 3, ["v128", "v128"], ["v128"]);
+}
+
+// float lane arithmetic
+for (const [ns, base] of [["f32x4", 224], ["f64x2", 236]]) {
+  simd(ns, "abs", base, ["v128"], ["v128"]);
+  simd(ns, "neg", base + 1, ["v128"], ["v128"]);
+  simd(ns, "sqrt", base + 3, ["v128"], ["v128"]);
+  simd(ns, "add", base + 4, ["v128", "v128"], ["v128"]);
+  simd(ns, "sub", base + 5, ["v128", "v128"], ["v128"]);
+  simd(ns, "mul", base + 6, ["v128", "v128"], ["v128"]);
+  simd(ns, "div", base + 7, ["v128", "v128"], ["v128"]);
+  simd(ns, "min", base + 8, ["v128", "v128"], ["v128"]);
+  simd(ns, "max", base + 9, ["v128", "v128"], ["v128"]);
+  simd(ns, "pmin", base + 10, ["v128", "v128"], ["v128"]);
+  simd(ns, "pmax", base + 11, ["v128", "v128"], ["v128"]);
+}
+simd("f32x4", "ceil", 103, ["v128"], ["v128"]);
+simd("f32x4", "floor", 104, ["v128"], ["v128"]);
+simd("f32x4", "trunc", 105, ["v128"], ["v128"]);
+simd("f32x4", "nearest", 106, ["v128"], ["v128"]);
+simd("f64x2", "ceil", 116, ["v128"], ["v128"]);
+simd("f64x2", "floor", 117, ["v128"], ["v128"]);
+simd("f64x2", "trunc", 122, ["v128"], ["v128"]);
+simd("f64x2", "nearest", 148, ["v128"], ["v128"]);
+
+// vector conversions
+simd("i32x4", "trunc_sat_f32x4_s", 248, ["v128"], ["v128"]);
+simd("i32x4", "trunc_sat_f32x4_u", 249, ["v128"], ["v128"]);
+simd("f32x4", "convert_i32x4_s", 250, ["v128"], ["v128"]);
+simd("f32x4", "convert_i32x4_u", 251, ["v128"], ["v128"]);
+simd("i32x4", "trunc_sat_f64x2_s_zero", 252, ["v128"], ["v128"]);
+simd("i32x4", "trunc_sat_f64x2_u_zero", 253, ["v128"], ["v128"]);
+simd("f64x2", "convert_low_i32x4_s", 254, ["v128"], ["v128"]);
+simd("f64x2", "convert_low_i32x4_u", 255, ["v128"], ["v128"]);
+simd("f32x4", "demote_f64x2_zero", 94, ["v128"], ["v128"]);
+simd("f64x2", "promote_low_f32x4", 95, ["v128"], ["v128"]);
+
 export const OPTABLE = table;
 
 /** Miscellaneous opcode bytes used directly by the encoder. */
@@ -250,6 +425,7 @@ export const OPS = {
   i64_const: 0x42,
   f32_const: 0x43,
   f64_const: 0x44,
+  v128_const: [0xfd, 12],
   blocktype_empty: 0x40,
   functype: 0x60,
 };
