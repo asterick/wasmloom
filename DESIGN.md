@@ -18,7 +18,7 @@ toolchain; emits binary `.wasm` bytes directly.
 | Block values | Conditional values flow through locals (plus `select`); no typed-block results |
 | Expression reuse | Auto-bound to hidden locals; local slots reused when live ranges end |
 | IR | CFG of basic blocks from day one; relooper reconstructs structure at emit |
-| Local access | A local/param/global handle *is* a value expression; writes are `handle.set(v)` |
+| Variables | One concept: `mod.variable()` / `$.variable()` — owner decides global vs local. The handle *is* a value expression; writes are `handle.set(v)` |
 | Op naming | Mirror `.wat` exactly: `i32.div_s`, `i64.extend_i32_u`, `memory.copy` |
 | Zero-result ops | Auto-anchor as statements at their creation point (`i32.store(...)` is a statement) |
 | i64 immediates | BigInt always; plain numbers only when `Number.isSafeInteger`, else throw |
@@ -42,7 +42,7 @@ const odd  = mod.function([i32], [i32]).export("odd");
 const even = mod.function([i32], [i32]).export("even");
 
 const mem = mod.memory({ min: 1 }).export("memory");
-const counter = mod.global(i32, { mutable: true, init: 0 });
+const counter = mod.variable(i32, 0).export("counter");
 
 // Sugar for the common cases…
 odd.body((n, $) => {
@@ -75,7 +75,7 @@ placed).
 
 ```js
 sum.body((n, $) => {
-  const acc  = $.local(i32, i32.const(0));
+  const acc  = $.variable(i32, i32.const(0));
   const exit = $.label.ahead();
 
   const top = $.label();               // loop head, placed here
@@ -122,31 +122,39 @@ of blocks — conditional values are written to locals in each arm, or use
   `.export(name)`, `.import(module, name)`, `.body(fn)` chain; `.call(...)` is
   valid before the body exists. The body callback receives one expression node
   per parameter, then `$` last.
-- Same handle pattern throughout: `mod.memory()`, `mod.global()`, `mod.table()`,
-  `mod.data()`, `mod.elem()`, `mod.start(fn)`.
+- Same handle pattern throughout: `mod.memory()`, `mod.variable()`,
+  `mod.table()`, `mod.data()`, `mod.elem()`, `mod.start(fn)`.
 - Function types are interned/deduplicated into the type section automatically.
 - Loads/stores take the memory handle explicitly (`i32.load(mem, addr, {offset,
   align})`) so multi-memory bolts on later without an API break.
 
-### Globals, imports, exports
+### Variables, imports, exports
 
-- `mod.global(type, { mutable, init })` follows the local-access convention:
-  using the handle reads it (`global.get`); `handle.set(v)` writes, an eager
-  error if immutable. `init` accepts a plain JS value (auto-wrapped in the
+- **One variable concept** — the owner infers the wasm storage class:
+  `mod.variable(type, init?)` emits as a global, `$.variable(type, init?)` as
+  a local. Handles behave identically (direct-use read, `.set(v)` write).
+  Variables are mutable by default and zero-initialized by default, everywhere.
+- Module variables accept the extra chained attributes: `.export(name)`,
+  `.import(module, name)`, and `.immutable()` (after which `.set()` throws
+  eagerly; immutability is what makes an imported variable legal inside other
+  initializer expressions). `.immutable()` on a function-scoped variable is an
+  eager error — wasm locals are always mutable.
+- A module variable's `init` accepts a plain JS value (auto-wrapped in the
   right `t.const`, same strictness rules) or an expression node validated
   against wasm's constant-expression grammar (`t.const`, `ref.null`,
-  `ref.func`, `global.get` of an imported immutable global) — `i32.add(...)`
-  as an init throws at the `mod.global()` call.
+  `ref.func`, reads of imported immutable variables) — `i32.add(...)` as an
+  init throws at the `mod.variable()` call. Function-scoped `init` is
+  unrestricted: it desugars to a `.set()` at the declaration point.
 - **Imports build on the forward-decl syntax**: every entity is declared the
   same way, and `.import(module, name)` marks its implementation as externally
   supplied. `emit()` requires each function to have exactly one of `.body()`
   or `.import()`; both or neither is an error (likewise `init`/`.import()` on
-  globals).
+  module variables).
 
   ```js
   const log  = mod.function([i32], []).import("env", "log");   // log.call(x)
   const heap = mod.memory({ min: 1 }).import("env", "memory"); // i32.load(heap, …)
-  const base = mod.global(i32).import("env", "base");
+  const base = mod.variable(i32).import("env", "base").immutable();
   ```
 
 - The binary format puts imports at the low indices of each index space, but
@@ -167,13 +175,13 @@ of blocks — conditional values are written to locals in each arm, or use
 - Constructor names **mirror `.wat` exactly**: `i32.div_s`, `i32.shr_u`,
   `i64.extend_i32_s`, `i32.trunc_sat_f64_u`, `memory.copy` — greppable against
   the spec with zero translation.
-- A local, param, or global handle **is itself a value expression** — using it
-  anywhere reads it at that point (reads are unlimited and cheap); writes are
-  `handle.set(value)`.
+- A variable handle (or param — params are just pre-declared variables)
+  **is itself a value expression** — using it anywhere reads it at that point
+  (reads are unlimited and cheap); writes are `handle.set(value)`.
 - **Zero-result instructions are statements**: constructors whose instruction
   produces no value (`i32.store`, `memory.copy`, a call to a `[] -> []`
   function) append to the current block at the point they're called —
-  consistent with the creation-point rule below. `$` stays small: locals,
+  consistent with the creation-point rule below. `$` stays small: variables,
   labels, control flow, `$.return`, `$.drop`.
 - Immediates are strict: `i64.const` accepts BigInt always and plain numbers
   only when `Number.isSafeInteger(n)`; `i32.const` throws on non-integers or
