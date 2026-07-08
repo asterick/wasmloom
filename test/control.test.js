@@ -220,3 +220,58 @@ test("collatz: loops, chains, and calls combined", async () => {
   assert.equal(exports.collatz(6), 8);
   assert.equal(exports.collatz(27), 111);
 });
+
+test("label placed inside a sugar callback (labels are function-scoped)", async () => {
+  const mod = new Module();
+  mod.function([i32], [i32]).export("f").body((x, $) => {
+    const r = $.variable(i32);
+    const inside = $.label.ahead();
+    $.gotoIf(i32.eq(x, i32.const(2)), inside);
+    $.if(i32.eq(x, i32.const(1)), ($) => {
+      r.set(i32.const(10));
+      inside.here(); // placed inside the arm; jumped to from outside it
+      r.set(i32.add(r, i32.const(1)));
+    }).else(($) => {
+      r.set(i32.const(99));
+    });
+    $.return(r);
+  });
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.f(1), 11); // through the whole arm
+  assert.equal(exports.f(2), 1); // jumped past the first set
+  assert.equal(exports.f(0), 99); // else arm
+});
+
+test("label cannot be placed inside another function's body", () => {
+  const mod = new Module();
+  let leaked;
+  mod.function([], []).body(($) => {
+    leaked = $.label.ahead();
+    $.goto(leaked); // reference it so the unplaced check doesn't fire first
+    leaked.here();
+  });
+  mod.function([], []).body(($) => {
+    assert.throws(() => $.label.ahead() && leaked.here(), /already placed/);
+  });
+});
+
+test("label cannot be placed after its body completes", () => {
+  const mod = new Module();
+  let escaped;
+  mod.function([], []).body(($) => {
+    escaped = $.label.ahead();
+    // intentionally never placed inside; also never referenced
+  });
+  assert.throws(() => escaped.here(), /not currently being built/);
+});
+
+test("unplaced label from a foreign body cannot be placed there either", () => {
+  const mod = new Module();
+  let escaped;
+  mod.function([], []).body(($) => {
+    escaped = $.label.ahead();
+  });
+  mod.function([], []).body(($) => {
+    assert.throws(() => escaped.here(), /not currently being built/);
+  });
+});

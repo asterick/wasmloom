@@ -91,6 +91,16 @@ sum.body((n, $) => {
 
 - `$.goto(label)`, `$.gotoIf(cond, label)` — unconditional/conditional jumps.
 - `$.switch(index, [l0, l1, …], defaultLabel)` — dense dispatch, lowers to `br_table`.
+- **Labels are function-scoped, not closure-scoped.** The sugar callbacks are
+  just recording devices over a flat CFG, so `.here()` may be called inside
+  any nested `$.if`/`$.while` callback of the same body — placement lands
+  wherever the instruction stream currently is, and jumping into a
+  conditional arm from outside it is legal (the target simply becomes a merge
+  point). The two guardrails: placement (like `goto`) must happen while the
+  label's own `.body()` callback is running — escaping a label to another
+  function's body or past body completion is an eager error — and a
+  placement that creates a multi-entry loop is rejected as irreducible at
+  `emit()`.
 - Arbitrary jumps may produce **irreducible** control flow; the relooper must
   handle it in v1 (node splitting, dispatch-loop fallback for pathological cases).
 

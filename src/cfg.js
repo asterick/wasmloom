@@ -1,4 +1,5 @@
 import { fail } from "./errors.js";
+import { currentBuilder } from "./context.js";
 
 let nextBlockId = 1;
 
@@ -45,9 +46,21 @@ export class Label {
     if (builder.module.debug) this.trace = new Error().stack;
   }
 
-  /** Pin a forward-declared label at the current position. Exactly once. */
+  /**
+   * Pin a forward-declared label at the current position. Exactly once.
+   * Labels are function-scoped, not closure-scoped: placement may happen
+   * inside any nested `$.if`/`$.while` callback of the same body, but never
+   * from another function's body or after this body has completed.
+   */
   here() {
     if (this.placed) fail("label.here(): label is already placed", this);
+    if (currentBuilder() !== this.builder) {
+      fail(
+        "label.here(): label belongs to a function body that is not currently being built — " +
+        "labels must be placed while their own .body() callback is running",
+        this,
+      );
+    }
     this.builder.placeLabel(this);
     return this;
   }
