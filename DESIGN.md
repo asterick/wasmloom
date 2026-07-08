@@ -12,6 +12,7 @@ toolchain; emits binary `.wasm` bytes directly.
 | Spec target | Wasm 2.0 baseline: multi-value, bulk memory, reference types, sign-extension, nontrapping conversions |
 | Validation | Eager — type errors throw at the builder call that caused them |
 | Declarations | Handles: declare first, attach bodies later (forward decls, mutual recursion) |
+| Imports | Chained on the same declaration: `.import(module, name)` — exactly one of body/init or import |
 | Control flow | Labels are atomic symbols placed at creation; `goto` / `gotoIf` / `switch` by reference |
 | Sugar | Chained `$.if(c, fn).elseIf(c, fn).else(fn)` and `$.while(c, fn)`, desugaring to labels |
 | Block values | Conditional values flow through locals (plus `select`); no typed-block results |
@@ -33,8 +34,8 @@ import { Module, i32, i64, f32, f64 } from "wasmemit";
 
 const mod = new Module();
 
-// Imports are handles too — callable like any function.
-const log = mod.importFunction("env", "log", [i32], []);
+// An import is a declaration whose implementation is externally supplied.
+const log = mod.function([i32], []).import("env", "log");
 
 // Declare now, define later. Module-level attributes chain fluently.
 const odd  = mod.function([i32], [i32]).export("odd");
@@ -118,14 +119,44 @@ of blocks — conditional values are written to locals in each arm, or use
 ### Module entities
 
 - `mod.function(params, results)` returns a **function handle** immediately.
-  `.export(name)`, `.body(fn)` chain; `.call(...)` is valid before the body exists.
-  The body callback receives one expression node per parameter, then `$` last.
+  `.export(name)`, `.import(module, name)`, `.body(fn)` chain; `.call(...)` is
+  valid before the body exists. The body callback receives one expression node
+  per parameter, then `$` last.
 - Same handle pattern throughout: `mod.memory()`, `mod.global()`, `mod.table()`,
-  `mod.data()`, `mod.elem()`, `mod.start(fn)`, `mod.importFunction/importMemory/
-  importGlobal/importTable(...)`.
+  `mod.data()`, `mod.elem()`, `mod.start(fn)`.
 - Function types are interned/deduplicated into the type section automatically.
 - Loads/stores take the memory handle explicitly (`i32.load(mem, addr, {offset,
   align})`) so multi-memory bolts on later without an API break.
+
+### Globals, imports, exports
+
+- `mod.global(type, { mutable, init })` follows the local-access convention:
+  using the handle reads it (`global.get`); `handle.set(v)` writes, an eager
+  error if immutable. `init` accepts a plain JS value (auto-wrapped in the
+  right `t.const`, same strictness rules) or an expression node validated
+  against wasm's constant-expression grammar (`t.const`, `ref.null`,
+  `ref.func`, `global.get` of an imported immutable global) — `i32.add(...)`
+  as an init throws at the `mod.global()` call.
+- **Imports build on the forward-decl syntax**: every entity is declared the
+  same way, and `.import(module, name)` marks its implementation as externally
+  supplied. `emit()` requires each function to have exactly one of `.body()`
+  or `.import()`; both or neither is an error (likewise `init`/`.import()` on
+  globals).
+
+  ```js
+  const log  = mod.function([i32], []).import("env", "log");   // log.call(x)
+  const heap = mod.memory({ min: 1 }).import("env", "memory"); // i32.load(heap, …)
+  const base = mod.global(i32).import("env", "base");
+  ```
+
+- The binary format puts imports at the low indices of each index space, but
+  indices are assigned at `emit()` — declaration order is unconstrained; the
+  emitter sorts imports first. Assignment is deterministic: imports in
+  declaration order, then definitions in declaration order.
+- `.export(name)` chains on every exportable handle and returns it. Multiple
+  exports of one entity (aliases) are fine; re-exporting an import is fine
+  (`mod.function(...).import("env", "log").export("log")`). A duplicate export
+  *name* is an eager error at the second `.export()` call.
 
 ### Expressions
 
