@@ -1,0 +1,54 @@
+import { successors } from "../cfg.js";
+
+/**
+ * Backward liveness dataflow over virtual locals.
+ * Returns liveOut: Map<Block, Set<VLocal>>.
+ */
+export function computeLiveness(blocks, code, cfg) {
+  const { reachable, preds } = cfg;
+  const live = blocks.filter((b) => reachable.has(b));
+
+  // Per-block gen (upward-exposed uses) and kill (defs).
+  const gen = new Map();
+  const kill = new Map();
+  for (const block of live) {
+    const g = new Set();
+    const k = new Set();
+    for (const instr of code.get(block)) {
+      if (instr.k === "get") {
+        if (!k.has(instr.v)) g.add(instr.v);
+      } else if (instr.k === "set") {
+        k.add(instr.v);
+      }
+    }
+    gen.set(block, g);
+    kill.set(block, k);
+  }
+
+  const liveIn = new Map(live.map((b) => [b, new Set()]));
+  const liveOut = new Map(live.map((b) => [b, new Set()]));
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = live.length - 1; i >= 0; i--) {
+      const block = live[i];
+      const out = liveOut.get(block);
+      for (const s of successors(block)) {
+        for (const v of liveIn.get(s)) {
+          if (!out.has(v)) { out.add(v); changed = true; }
+        }
+      }
+      const inn = liveIn.get(block);
+      const k = kill.get(block);
+      for (const v of gen.get(block)) {
+        if (!inn.has(v)) { inn.add(v); changed = true; }
+      }
+      for (const v of out) {
+        if (!k.has(v) && !inn.has(v)) { inn.add(v); changed = true; }
+      }
+    }
+  }
+  void preds;
+  return liveOut;
+}
