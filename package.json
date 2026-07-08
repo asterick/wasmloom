@@ -1,0 +1,32 @@
+{
+  "name": "wasmemit",
+  "version": "0.0.0",
+  "description": "A JavaScript module for generating WebAssembly modules using expression builders",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "keywords": [
+    "webassembly",
+    "wasm",
+    "codegen",
+    "compiler",
+    "expression-builder"
+  ],
+  "author": "Bryon Vandiver <unicdk@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/asterick/wasmemit.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "src"
+  ]
+}
