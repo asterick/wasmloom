@@ -181,3 +181,53 @@ test("bulk ops from another module's handle are rejected", () => {
     throws(() => memA.size(), /different module/);
   });
 });
+
+test("multiple data segments get distinct indices", async () => {
+  const mod = new Module();
+  const mem = mod.memory({ min: 1 }).export("memory");
+  mod.data(new Uint8Array([1, 1])).at(mem, 0); // active, index 0
+  const segA = mod.data(new Uint8Array([2, 2])); // passive, index 1
+  mod.data(new Uint8Array([3, 3])).at(mem, 4); // active, index 2
+  const segB = mod.data(new Uint8Array([4, 4])); // passive, index 3
+  mod.function([], []).export("f").body(($) => {
+    mem.init(segB, s32.const(8), s32.const(0), s32.const(2)); // must hit segment 3, not 1
+    mem.init(segA, s32.const(12), s32.const(0), s32.const(2));
+  });
+  const { exports } = await instantiate(mod);
+  exports.f();
+  const bytes = new Uint8Array(exports.memory.buffer);
+  assert.deepEqual([...bytes.slice(0, 2)], [1, 1]);
+  assert.deepEqual([...bytes.slice(4, 6)], [3, 3]);
+  assert.deepEqual([...bytes.slice(8, 10)], [4, 4]);
+  assert.deepEqual([...bytes.slice(12, 14)], [2, 2]);
+});
+
+test("active offset as a const expression node", async () => {
+  const mod = new Module();
+  const mem = mod.memory({ min: 1 }).export("memory");
+  mod.data(new Uint8Array([7, 7])).at(mem, u32.const(24));
+  const { exports } = await instantiate(mod);
+  assert.deepEqual([...new Uint8Array(exports.memory.buffer, 24, 2)], [7, 7]);
+});
+
+test("empty data segments are legal", async () => {
+  const mod = new Module();
+  const mem = mod.memory({ min: 1 }).export("memory");
+  mod.data(new Uint8Array(0)).at(mem, 0);
+  const seg = mod.data(new Uint8Array(0));
+  mod.function([], []).export("f").body(($) => {
+    mem.init(seg, s32.const(0), s32.const(0), s32.const(0));
+    seg.drop();
+  });
+  const { exports } = await instantiate(mod);
+  exports.f();
+});
+
+test("an active segment that does not fit fails at instantiation", async () => {
+  const mod = new Module();
+  const mem = mod.memory({ min: 1 });
+  mod.data(new Uint8Array(16)).at(mem, 65528); // spills past the single page
+  const bytes = mod.emit();
+  assert.ok(WebAssembly.validate(bytes), "still a valid module — failure is at instantiation");
+  await assert.rejects(WebAssembly.instantiate(bytes), WebAssembly.RuntimeError);
+});

@@ -68,49 +68,65 @@ export function linearize(builder, cfg) {
   for (const block of builder.blocks) {
     if (!reachable.has(block)) continue;
     const out = [];
-    const emitTree = (node, materializing = false) => {
-      if (node.temp && !materializing) {
-        out.push({ k: "get", v: node.temp });
-        return;
-      }
-      switch (node.kind) {
-        case "const":
-          out.push({ k: "const", type: node.type, value: node.value });
-          break;
-        case "read": {
-          const v = node.variable;
-          out.push(v.scope === "module" ? { k: "gget", g: v } : { k: "get", v: v.vlocal });
-          break;
-        }
-        case "op":
-          for (const o of node.operands) emitTree(o);
-          out.push({ k: "op", entry: node.entry, memarg: node.memarg, segment: node.segment });
-          break;
-        case "cast":
-          // zero-cost retype — same bits, no instruction
-          emitTree(node.operands[0]);
-          break;
-        case "call":
-          for (const o of node.operands) emitTree(o);
-          out.push({ k: "call", fn: node.func });
-          if (node.spillTemps) {
-            for (let i = node.spillTemps.length - 1; i >= 0; i--) {
-              out.push({ k: "set", v: node.spillTemps[i] });
-            }
+    // Explicit two-phase stack — expression chains can be arbitrarily deep,
+    // so this must not recurse (see limits.test.js).
+    const emitTree = (root, materializing = false) => {
+      const stack = [{ node: root, enter: true, materializing }];
+      while (stack.length > 0) {
+        const frame = stack.pop();
+        const node = frame.node;
+        if (frame.enter) {
+          if (node.temp && !frame.materializing) {
+            out.push({ k: "get", v: node.temp });
+            continue;
           }
-          break;
-        case "set": {
-          emitTree(node.operands[0]);
-          const v = node.variable;
-          out.push(v.scope === "module" ? { k: "gset", g: v } : { k: "set", v: v.vlocal });
-          break;
+          switch (node.kind) {
+            case "const":
+              out.push({ k: "const", type: node.type, value: node.value });
+              break;
+            case "read": {
+              const v = node.variable;
+              out.push(v.scope === "module" ? { k: "gget", g: v } : { k: "get", v: v.vlocal });
+              break;
+            }
+            case "op":
+            case "call":
+            case "set":
+            case "drop":
+            case "cast":
+              stack.push({ node, enter: false });
+              for (let i = node.operands.length - 1; i >= 0; i--) {
+                stack.push({ node: node.operands[i], enter: true });
+              }
+              break;
+            default:
+              fail(`internal: cannot linearize node kind ${node.kind}`);
+          }
+        } else {
+          switch (node.kind) {
+            case "op":
+              out.push({ k: "op", entry: node.entry, memarg: node.memarg, segment: node.segment });
+              break;
+            case "call":
+              out.push({ k: "call", fn: node.func });
+              if (node.spillTemps) {
+                for (let i = node.spillTemps.length - 1; i >= 0; i--) {
+                  out.push({ k: "set", v: node.spillTemps[i] });
+                }
+              }
+              break;
+            case "set": {
+              const v = node.variable;
+              out.push(v.scope === "module" ? { k: "gset", g: v } : { k: "set", v: v.vlocal });
+              break;
+            }
+            case "drop":
+              out.push({ k: "drop" });
+              break;
+            case "cast":
+              break; // zero-cost retype — same bits, no instruction
+          }
         }
-        case "drop":
-          emitTree(node.operands[0]);
-          out.push({ k: "drop" });
-          break;
-        default:
-          fail(`internal: cannot linearize node kind ${node.kind}`);
       }
     };
 

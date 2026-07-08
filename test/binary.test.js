@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, s64 } from "../src/index.js";
+import { Module, s32, s64, f32, f64 } from "../src/index.js";
 
 // Targeted binary-level assertions (not golden snapshots): section structure
 // facts that behavioral round-trips can't see.
@@ -101,4 +101,51 @@ test("function indices above 127 encode correctly (multi-byte LEB)", async () =>
   assert.ok(WebAssembly.validate(bytes));
   const { instance } = await WebAssembly.instantiate(bytes);
   assert.equal(instance.exports.last(), 139);
+});
+
+// A module exercising most of the surface at once, for whole-pipeline invariants.
+function kitchenSink(opts) {
+  const mod = new Module(opts);
+  const mem = mod.memory({ min: 1 }).export("memory");
+  const g = mod.variable(s64, -5).export("g");
+  const seg = mod.data(new Uint8Array([1, 2, 3, 4]));
+  mod.data(new Uint8Array([9, 9])).at(mem, 32);
+  const helper = mod.function([s32], [s32, s32]).body((x, $) => {
+    $.return(s32.add(x, s32.const(1)), s32.mul(x, x));
+  });
+  mod.function([s32, f32], [f64]).export("f").body((n, x, $) => {
+    const acc = $.variable(f64);
+    const [a, b] = helper.call(n);
+    const shared = s32.add(a, b); // multi-use → temp
+    mem.init(seg, s32.const(0), s32.const(0), s32.const(4));
+    s32.store8(mem, s32.const(8), shared);
+    g.set(shared); // promotion s32→s64
+    $.while(s32.gt(n, s32.const(0)), ($) => {
+      acc.set(f64.add(acc, x)); // promotion f32→f64
+      n.set(s32.sub(n, s32.const(1)));
+    });
+    const done = $.label.ahead();
+    $.gotoIf(f64.gt(acc, f64.const(100)), done);
+    acc.set(f64.add(acc, shared));
+    done.here();
+    $.return(f64.select(s32.eqz(n), acc, f64.const(-1)));
+  });
+  return mod;
+}
+
+test("debug mode emits byte-identical output", () => {
+  assert.deepEqual([...kitchenSink({ debug: true }).emit()], [...kitchenSink({}).emit()]);
+});
+
+test("emit() stays byte-stable across the full feature surface", async () => {
+  const mod = kitchenSink({});
+  const first = [...mod.emit()];
+  assert.deepEqual([...mod.emit()], first);
+  assert.deepEqual([...mod.emit()], first);
+  // and the module actually runs
+  const { instance } = await WebAssembly.instantiate(mod.emit());
+  // helper(4) → (5, 16); shared = 21; loop adds 0.5 four times → acc = 2;
+  // acc += shared → 23; n == 0 → select takes acc
+  assert.equal(instance.exports.f(4, 0.5), 23);
+  assert.equal(instance.exports.g.value, 21n);
 });

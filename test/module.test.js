@@ -195,3 +195,30 @@ test("load/store offsets are applied", async () => {
   // out-of-page-bounds traps
   assert.throws(() => exports.poke(100, 1), WebAssembly.RuntimeError);
 });
+
+test("four mixed-type results destructure and spill correctly", async () => {
+  const { f32, u32, bool } = await import("../src/index.js");
+  const mod = new Module();
+  const quad = mod.function([s32], [s32, f64, s64, bool]).body((x, $) => {
+    $.return(
+      s32.add(x, s32.const(1)),
+      f64.mul(f64.convert(x), f64.const(0.5)),
+      s64.extend(x),
+      s32.gt(x, s32.const(0)),
+    );
+  });
+  mod.function([s32], [f64]).export("sum").body((x, $) => {
+    const [a, b, c, d] = quad.call(x);
+    // fold all four back together (a, c, d promote into f64-compatible forms)
+    $.return(f64.add(f64.add(f64.convert(a), b), f64.add(f64.convert(s32.wrap(c)), d)));
+  });
+  mod.function([s32], [s32]).export("partial").body((x, $) => {
+    const [first] = quad.call(x); // using one element consumes the call
+    $.return(first);
+  });
+  const { exports } = await instantiate(mod);
+  // x=6: a=7, b=3, c=6, d=1 → 7+3+6+1 = 17
+  assert.equal(exports.sum(6), 17);
+  assert.equal(exports.partial(41), 42);
+  void f32; void u32; void bool;
+});
