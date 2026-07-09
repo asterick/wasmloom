@@ -149,7 +149,7 @@ type GlobalInit<T extends TypeName> =
   Expr<T> | Global<T> | number | bigint | boolean | readonly (number | bigint)[];
 
 export class Module {
-  constructor(opts?: { debug?: boolean; permissive?: boolean });
+  constructor(opts?: { debug?: boolean; permissive?: boolean; tailCalls?: boolean });
   function<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): Func<P, R>;
   function<P extends readonly WasmType[], R extends readonly WasmType[]>(type: FuncType<P, R>): Func<P, R>;
   funcType<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): FuncType<P, R>;

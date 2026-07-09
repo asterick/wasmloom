@@ -371,15 +371,19 @@ export class Module {
    * namespace type when they fit exactly (s32→s64, u32→s64/u64, f32→f64,
    * s32/u32→f64, bool→anything numeric). Lossy or narrowing moves are errors.
    *
-   * @param {{debug?: boolean, permissive?: boolean}} [opts]
+   * @param {{debug?: boolean, permissive?: boolean, tailCalls?: boolean}} [opts]
    *  - debug: capture creation stack traces for emit-time errors
    *  - permissive: bit-level leniency within a storage width — conditions
    *    accept integers (non-zero is true), integer positions accept the
    *    opposite signedness, bool positions test integers for ≠0
+   *  - tailCalls: default true — $.return of a call emits return_call.
+   *    Set false to keep plain calls (full stack traces; no wasm 3.0
+   *    engine requirement from this feature)
    */
   constructor(opts = {}) {
     this.debug = opts.debug ?? false;
     this.permissive = opts.permissive ?? false;
+    this.tailCalls = opts.tailCalls ?? true;
     this.functions = [];
     this.variables = [];
     this.memories = [];

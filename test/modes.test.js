@@ -111,3 +111,30 @@ test("permissive composes with default promotion; strict remains the default", a
     throws(() => $.if(a, () => {}), /expected bool/);
   });
 });
+
+// --- tailCalls: false — keep plain calls ---------------------------------------
+
+test("tailCalls: false keeps $.return(f.call()) a plain call", async () => {
+  const build = (opts) => {
+    const mod = new Module(opts);
+    const down = mod.function([s32], [s32]);
+    down.body((n, $) => {
+      $.if(s32.eqz(n), ($) => $.return(s32.const(1)));
+      $.return(down.call(s32.sub(n, s32.const(1))));
+    });
+    mod.function([s32], [s32]).export("f").body((n, $) => $.return(down.call(n)));
+    return mod;
+  };
+
+  const plain = await instantiate(build({ tailCalls: false }));
+  const tail = await instantiate(build({}));
+  // identical shallow behavior…
+  assert.equal(plain.exports.f(100), 1);
+  assert.equal(tail.exports.f(100), 1);
+  // …but only the default completes deep recursion; the flag restores real
+  // frames, which exhaust the stack (RangeError, not a wasm trap)
+  assert.equal(tail.exports.f(5_000_000), 1);
+  assert.throws(() => plain.exports.f(5_000_000), RangeError);
+  // and the emitted bytes genuinely differ
+  assert.notDeepEqual([...build({ tailCalls: false }).emit()], [...build({}).emit()]);
+});

@@ -209,7 +209,7 @@ export function linearize(builder, cfg) {
     else if (t.kind === "switch") emitTree(t.index);
     else if (t.kind === "return") {
       for (const v of t.values) emitTree(v);
-      rewriteTailCall(block, out);
+      if (builder.module.tailCalls) rewriteTailCall(block, out);
     }
     code.set(block, out);
   }

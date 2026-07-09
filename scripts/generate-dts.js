@@ -208,7 +208,7 @@ export function generateDts() {
   push("  Expr<T> | Global<T> | number | bigint | boolean | readonly (number | bigint)[];");
   push("");
   push("export class Module {");
-  push("  constructor(opts?: { debug?: boolean; permissive?: boolean });");
+  push("  constructor(opts?: { debug?: boolean; permissive?: boolean; tailCalls?: boolean });");
   push("  function<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): Func<P, R>;");
   push("  function<P extends readonly WasmType[], R extends readonly WasmType[]>(type: FuncType<P, R>): Func<P, R>;");
   push("  funcType<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): FuncType<P, R>;");
