@@ -8,7 +8,7 @@ A JavaScript library for generating WebAssembly binaries via expression
 builders — no external toolchain, `mod.emit()` → `Uint8Array`. The whole
 Wasm 2.0 surface is implemented, **including fixed-width SIMD**, plus
 multiple memories, extended constant expressions, tail calls, and typed
-function references from wasm 3.0. 236 tests, all passing (`npm test`,
+function references from wasm 3.0. 239 tests, all passing (`npm test`,
 Node ≥ 18 — the wasm 3.0 features need a newer engine, Node ≥ 22 in
 practice; zero dependencies).
 
@@ -93,8 +93,14 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
   against a lane-wise JS reference, operands routed through linear memory
   (v128 can't cross the JS boundary). Register vector veneer ops before the
   `vec`-flag marking loop in expr.js so both sweeps stay partitioned.
-- `fuzz` (CFG/relooper) and `expr-fuzz` (expression semantics) — the two
-  differential fuzzers; extend these before hand-writing many cases.
+- `fuzz` (CFG/relooper), `expr-fuzz` (expression semantics), and
+  `module-fuzz` (cross-function call graphs: direct/indirect/call_ref
+  dispatch, multi-value spills, tail conversion, globals — vs a JS
+  interpreter with fuel-bounded recursion) — the three differential
+  fuzzers; extend these before hand-writing many cases.
+- `perf-canary` — emit-time bounds for a 3000-function module and a
+  thousands-of-blocks function (5s each, ~10× dev-machine time). Caught
+  quadratic liveness on day one; if one trips, something real regressed.
 - `memory-sweep` — all load/store variants vs DataView; bulk-op semantics.
 - `simd` — behavioral: masks end-to-end, shape-barrier errors, casts,
   v128 variables/globals, lane memory ops, shuffle/swizzle.
