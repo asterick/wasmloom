@@ -8,7 +8,7 @@ A JavaScript library for generating WebAssembly binaries via expression
 builders — no external toolchain, `mod.emit()` → `Uint8Array`. The whole
 Wasm 2.0 surface is implemented, **including fixed-width SIMD**, plus
 multiple memories, extended constant expressions, tail calls, and typed
-function references from wasm 3.0. 218 tests, all passing (`npm test`,
+function references from wasm 3.0. 236 tests, all passing (`npm test`,
 Node ≥ 18 — the wasm 3.0 features need a newer engine, Node ≥ 22 in
 practice; zero dependencies).
 
@@ -115,7 +115,8 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
   `tables`, `signedness`, `bool`, `select`, `promotion`, `modes`,
   `errors` (~35 eager-error paths), `binary` (section-level asserts and
   peephole byte checks), `slots-stress`, `limits` (depth canaries), `leb`,
-  `dts` (generated declarations staleness).
+  `dts` (generated declarations staleness), `docs-examples`
+  (every manual example executes; cross-links checked).
 
 ## Queue (in priority order)
 
