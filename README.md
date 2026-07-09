@@ -4,7 +4,9 @@ A JavaScript module for generating WebAssembly modules using expression builders
 Emits valid `.wasm` binaries directly, with no external toolchain and zero
 dependencies. Ships generated TypeScript declarations.
 
-See [DESIGN.md](DESIGN.md) for the full design contract.
+**[Reference manual](docs/index.md)** — a multipage manual with tested
+examples, one section per WebAssembly proposal (also served via GitHub
+Pages). [DESIGN.md](DESIGN.md) is the design contract.
 
 ## Example
 

@@ -1,0 +1,4 @@
+title: wasmemit
+description: Generate WebAssembly binaries from JavaScript expression builders — no toolchain, zero dependencies.
+theme: jekyll-theme-cayman
+markdown: kramdown
