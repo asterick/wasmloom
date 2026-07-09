@@ -14,6 +14,41 @@ import { describeNode } from "../node.js";
  *   { k: 'call', fn }
  *   { k: 'drop' }
  */
+/**
+ * Tail calls are implicit: `$.return(f.call(…))` (and the indirect and
+ * multi-value forms) lowers to return_call when the returned values are
+ * exactly the results of a call evaluated last. Structurally, the emitted
+ * suffix is then [call, set t.., get t..] with the sets mirroring the gets —
+ * the spill of a multi-result call, or a single-use binding. Those writes are
+ * dead at a return (the block has no successors), so dropping them and the
+ * call itself leaves the arguments on the stack for the tail call. Anything
+ * that breaks the pattern — an intervening statement, a promotion around the
+ * result, a second consumer — correctly leaves the call in place.
+ */
+function rewriteTailCall(block, out) {
+  const t = block.term;
+  let i = out.length;
+  const gets = [];
+  while (i > 0 && out[i - 1].k === "get") gets.push(out[--i]);
+  const sets = [];
+  while (i > 0 && out[i - 1].k === "set") sets.push(out[--i]);
+  if (gets.length !== sets.length) return;
+  const call = i > 0 ? out[i - 1] : null;
+  if (!call || (call.k !== "call" && call.k !== "call_indirect")) return;
+  const results = call.k === "call" ? call.fn.results.length : call.type.results.length;
+  if (gets.length > 0 && results !== gets.length) return;
+  if (t.values.length !== results) return;
+  // spill order: set t(n-1)..t(0), then get t(0)..t(n-1) — collected
+  // back-to-front the arrays are each other's reverse when they mirror
+  for (let j = 0; j < sets.length; j++) {
+    if (sets[j].v !== gets[gets.length - 1 - j].v) return;
+  }
+  out.length = i - 1; // drop the call and the dead spill writes/reads
+  block.term = call.k === "call"
+    ? { kind: "returnCall", func: call.fn }
+    : { kind: "returnCallIndirect", funcType: call.type, table: call.table };
+}
+
 export function linearize(builder, cfg) {
   const { reachable, dominates } = cfg;
 
@@ -172,11 +207,9 @@ export function linearize(builder, cfg) {
     const t = block.term;
     if (t.kind === "branch") emitTree(t.cond);
     else if (t.kind === "switch") emitTree(t.index);
-    else if (t.kind === "return") for (const v of t.values) emitTree(v);
-    else if (t.kind === "returnCall") for (const v of t.args) emitTree(v);
-    else if (t.kind === "returnCallIndirect") {
-      for (const v of t.args) emitTree(v);
-      emitTree(t.index); // args, then index, on the stack
+    else if (t.kind === "return") {
+      for (const v of t.values) emitTree(v);
+      rewriteTailCall(block, out);
     }
     code.set(block, out);
   }

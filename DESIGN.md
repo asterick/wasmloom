@@ -27,7 +27,7 @@ toolchain; emits binary `.wasm` bytes directly.
 | Consts | Range-checked per namespace: `s32.const` in [-2^31, 2^31), `u32.const` in [0, 2^32), etc.; `f32.const` rounds |
 | Safe promotion | Default behavior: operands lift value-exactly into an op's namespace type (s32/u32/bool→s64, u32/bool→u64, f32/s32/u32/bool→f64, bool→s32/u32/f32) — the namespace names the target explicitly, so nothing implicit is guarded. Lossy/narrowing always errors |
 | Permissive mode | `permissive: true` (opt-in, never default in tests) — bit-level leniency within a storage width: integer conditions, mixed signedness retypes, integers in bool positions get a real ≠0 test |
-| Tail calls | `$.returnCall(fn, ...args)` and `$.returnCall(tbl, funcType, index, ...args)` — terminator statements on the `$` context; the callee's results must exactly match the caller's (eager error, and encoded in the generated types) |
+| Tail calls | Implicit: `$.return(f.call(…))` (also indirect and multi-value spreads) emits `return_call` whenever the returned values are exactly the results of a call evaluated last. The rule is exact, not heuristic — evaluation-order semantics make a single-use returned call always evaluate at the return, and spill/binding writes are dead there. Anything that breaks the pattern (intervening effects after a spilled call, promotion around the result, a second consumer) stays a plain call. No explicit form |
 | Const expressions | `add`/`sub`/`mul` on the integer namespaces double as wasm 3.0 extended constant expressions when built outside a body — one concept, context decides. Operands: consts, immutable module variables (imported or previously declared — the handle-first API makes forward refs unconstructible), nested const ops. Usable as inits and data/element offsets, and reusable inside bodies as ordinary code |
 | SIMD lanes | Lane namespaces follow signedness: `s8x16`/`u8x16`/`s16x8`/`u16x8`/`s32x4`/`u32x4`/`s64x2`/`u64x2`/`f32x4`/`f64x2`, all views over one v128 storage. Suffix-less names select variants (`u8x16.shr` → `i8x16.shr_u`); widening/narrowing families follow the namespace (`s32x4.extend_low(s16x8)`) |
 | SIMD masks | Comparisons produce dedicated mask types (`m8x16`/`m16x8`/`m32x4`/`m64x2`) — the SIMD analog of `bool`. `bitselect` requires a shape-matched mask; `any_true`/`all_true` (→ `bool`) and `bitmask` (→ `u32`) live on masks. Masks are not data and not conditions |
@@ -100,10 +100,16 @@ sum.body((n, $) => {
 
 - `$.goto(label)`, `$.gotoIf(cond, label)` — unconditional/conditional jumps.
 - `$.switch(index, [l0, l1, …], defaultLabel)` — dense dispatch, lowers to `br_table`.
-- `$.returnCall(fn, ...args)` / `$.returnCall(tbl, funcType, index, ...args)` —
-  tail calls (`return_call` / `return_call_indirect`): the callee replaces this
-  frame, so deep self/mutual recursion runs in constant stack. Terminators,
-  like `$.return`; the callee's results must exactly match the caller's.
+- **Tail calls are implicit**: `$.return(f.call(…))`, `$.return(...f.call(…))`
+  (multi-value), and `$.return(tbl.call(sig, i, …))` lower to
+  `return_call`/`return_call_indirect` — the callee replaces the frame, so
+  deep self/mutual recursion runs in constant stack. The rule: the returned
+  values are exactly the results of a call evaluated last. Single-use calls
+  always qualify (they evaluate at the return); a result bound to a variable
+  and immediately returned also converts (the write is dead at a return). A
+  spilled multi-value call with effectful statements before the return, or a
+  result that needs promotion, stays a plain call. Emitting a tail call makes
+  the module require a wasm 3.0 engine.
 - **Labels are function-scoped, not closure-scoped.** The sugar callbacks are
   just recording devices over a flat CFG, so `.here()` may be called inside
   any nested `$.if`/`$.while` callback of the same body — placement lands

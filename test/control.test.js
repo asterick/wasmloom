@@ -279,15 +279,15 @@ test("unplaced label from a foreign body cannot be placed there either", () => {
   });
 });
 
-test("tail calls: deep accumulator recursion reuses the frame", async () => {
+test("tail calls: $.return of a call is an implicit return_call", async () => {
   const mod = new Module();
   const sum = mod.function([s32, s32], [s32]);
   sum.body((n, acc, $) => {
     $.if(s32.eqz(n), ($) => $.return(acc));
-    $.returnCall(sum, s32.sub(n, s32.const(1)), s32.add(acc, n));
+    $.return(sum.call(s32.sub(n, s32.const(1)), s32.add(acc, n)));
   });
   mod.function([s32], [s32]).export("sum").body((n, $) => {
-    $.returnCall(sum, n, s32.const(0));
+    $.return(sum.call(n, s32.const(0)));
   });
   const { exports } = await instantiate(mod);
   // ten million frames would overflow any real stack without return_call
@@ -295,48 +295,97 @@ test("tail calls: deep accumulator recursion reuses the frame", async () => {
   assert.equal(exports.sum(3), 6);
 });
 
-test("tail calls: mutual recursion (even/odd)", async () => {
+test("tail calls: a bound-then-returned result still converts (dead write)", async () => {
+  const mod = new Module();
+  const down = mod.function([s32], [s32]);
+  down.body((n, $) => {
+    $.if(s32.eqz(n), ($) => $.return(s32.const(42)));
+    const r = $.variable(s32);
+    r.set(down.call(s32.sub(n, s32.const(1))));
+    $.return(r); // set r; get r at a return is dead — converts to return_call
+  });
+  mod.function([s32], [s32]).export("f").body((n, $) => $.return(down.call(n)));
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.f(2_000_000), 42);
+});
+
+test("tail calls: mutual recursion (even/odd) converts", async () => {
   const mod = new Module();
   const even = mod.function([s32], [s32]);
   const odd = mod.function([s32], [s32]);
   even.body((n, $) => {
     $.if(s32.eqz(n), ($) => $.return(s32.const(1)));
-    $.returnCall(odd, s32.sub(n, s32.const(1)));
+    $.return(odd.call(s32.sub(n, s32.const(1))));
   });
   odd.body((n, $) => {
     $.if(s32.eqz(n), ($) => $.return(s32.const(0)));
-    $.returnCall(even, s32.sub(n, s32.const(1)));
+    $.return(even.call(s32.sub(n, s32.const(1))));
   });
-  mod.function([s32], [s32]).export("even").body((n, $) => $.returnCall(even, n));
+  mod.function([s32], [s32]).export("even").body((n, $) => $.return(even.call(n)));
   const { exports } = await instantiate(mod);
   assert.equal(exports.even(1_000_000), 1);
   assert.equal(exports.even(1_000_001), 0);
 });
 
-test("tail calls: indirect through a table", async () => {
+test("tail calls: indirect through a table converts", async () => {
   const mod = new Module();
   const sig = mod.funcType([s32], [s32]);
-  const dbl = mod.function([s32], [s32]).body((x, $) => $.return(s32.mul(x, s32.const(2))));
-  const neg = mod.function([s32], [s32]).body((x, $) => $.return(s32.sub(s32.const(0), x)));
-  const tbl = mod.table(funcref, { min: 2 });
-  mod.elem([dbl, neg]).at(tbl, 0);
-  mod.function([s32, s32], [s32]).export("dispatch").body((i, x, $) => {
-    $.returnCall(tbl, sig, u32.cast(i), x);
+  const tbl = mod.table(funcref, { min: 1 });
+  const step = mod.function([s32], [s32]);
+  step.body((n, $) => {
+    $.if(s32.eqz(n), ($) => $.return(s32.const(7)));
+    $.return(tbl.call(sig, u32.const(0), s32.sub(n, s32.const(1))));
+  });
+  mod.elem([step]).at(tbl, 0);
+  mod.function([s32], [s32]).export("f").body((n, $) => {
+    $.return(tbl.call(sig, u32.const(0), n));
   });
   const { exports } = await instantiate(mod);
-  assert.equal(exports.dispatch(0, 21), 42);
-  assert.equal(exports.dispatch(1, 21), -21);
+  assert.equal(exports.f(1_000_000), 7); // constant stack through call_indirect
 });
 
-test("tail calls: eager errors for mismatched results, args, and handles", () => {
+test("tail calls: multi-value results convert through their spills", async () => {
   const mod = new Module();
-  const wrongResults = mod.function([], [s64]).body(($) => $.return(s64.const(0n)));
-  const callee = mod.function([s32], [s32]).body((x, $) => $.return(x));
-  mod.function([s32], [s32]).body((x, $) => {
-    assert.throws(() => $.returnCall(wrongResults), /must exactly match this function's results/);
-    assert.throws(() => $.returnCall(callee), /expects 1 argument/);
-    assert.throws(() => $.returnCall(callee, s64.const(1n)), /expected s32, got s64/);
-    assert.throws(() => $.returnCall({}), /expected a function handle/);
-    $.return(x);
+  const fib = mod.function([s32, s32, s32], [s32, s32]);
+  fib.body((n, a, b, $) => {
+    $.if(s32.eqz(n), ($) => $.return(a, b));
+    $.return(...fib.call(s32.sub(n, s32.const(1)), b, s32.add(a, b)));
   });
+  mod.function([s32], [s32]).export("fib").body((n, $) => {
+    const [a] = fib.call(n, s32.const(0), s32.const(1));
+    $.return(a);
+  });
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.fib(10), 55);
+  // deep: two million frames only complete tail-called
+  let a = 0;
+  let b = 1;
+  for (let i = 0; i < 2_000_000; i++) [a, b] = [b, (a + b) | 0];
+  assert.equal(exports.fib(2_000_000), a);
+});
+
+test("tail calls: effects between a spilled call and the return block conversion", async () => {
+  const mod = new Module();
+  const g = mod.variable(s32).export("g");
+  const pair = mod.function([s32], [s32, s32]);
+  pair.body((x, $) => $.return(x, s32.mul(x, s32.const(2))));
+  mod.function([s32], [s32, s32]).export("f").body((x, $) => {
+    const [a, b] = pair.call(x);
+    g.set(s32.const(7)); // effect between the call and the return — must stay a plain call
+    $.return(a, b);
+  });
+  const { exports } = await instantiate(mod);
+  assert.deepEqual(exports.f(21), [21, 42]);
+  assert.equal(exports.g.value, 7);
+});
+
+test("tail calls: a promoted result is not a tail position", async () => {
+  const mod = new Module();
+  const small = mod.function([s32], [s32]);
+  small.body((x, $) => $.return(s32.add(x, s32.const(1))));
+  mod.function([s32], [s64]).export("f").body((x, $) => {
+    $.return(s64.add(s64.const(0n), small.call(x))); // promotion wraps the call
+  });
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.f(41), 42n);
 });

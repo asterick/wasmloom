@@ -99,8 +99,10 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
   v128 variables/globals, lane memory ops, shuffle/swizzle.
 - `constexpr` — extended constant expressions: init/offset arithmetic,
   preceding-global refs, promotion of const operands, eager and emit-time
-  error paths. Tail calls live in `control` (deep/mutual/indirect recursion
-  at millions of frames, eager result/arg mismatch errors).
+  error paths. Tail calls live in `control`: IMPLICIT — `$.return(f.call())`
+  converts via a linearize peephole (passes/linearize.js rewriteTailCall);
+  proven by millions-of-frames recursion (direct/bound/mutual/indirect/
+  multi-value) plus non-conversion safety cases.
 - `irreducible` — crafted multi-entry loops: br_table into a loop, temps
   across split copies, nesting, a complete switch web that deterministically
   exhausts the split budget and exercises the dispatch-loop fallback, and

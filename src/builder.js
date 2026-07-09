@@ -2,7 +2,6 @@ import { fail } from "./errors.js";
 import { checkValType } from "./types.js";
 import { resolveInt32, resolveBool, defaultInit } from "./expr.js";
 import { isRef } from "./types.js";
-import { funcref } from "./types.js";
 import { Block, Label, successors } from "./cfg.js";
 import { makeNode, resolveOperand, describeNode } from "./node.js";
 import { Variable } from "./variable.js";
@@ -278,59 +277,6 @@ function makeDollar(b) {
       const resolved = values.map((v, i) => resolveOperand(v, expected[i], `$.return value ${i + 1}`));
       for (const r of resolved) r.consumers.push({ block: b.current });
       b.terminate({ kind: "return", values: resolved });
-    },
-
-    /**
-     * Tail call — replaces this frame instead of growing the stack.
-     * `$.returnCall(fn, ...args)` for a direct call, or
-     * `$.returnCall(tbl, funcType, index, ...args)` through a table.
-     * The callee's results must exactly match this function's results.
-     */
-    returnCall(target, ...args) {
-      b.flush();
-      const checkResults = (results, what) => {
-        const own = b.handle.results;
-        const same = results.length === own.length && results.every((t, i) => t === own[i]);
-        if (!same) {
-          const list = (ts) => `[${ts.map((t) => t.name).join(", ")}]`;
-          fail(
-            `${what}: a tail call returns the callee's results directly, so they must exactly ` +
-            `match this function's results — callee returns ${list(results)}, this function ${list(own)}`,
-          );
-        }
-      };
-      if (target?.handleKind === "function") {
-        const what = "$.returnCall";
-        if (target.module !== b.module) fail(`${what}: function belongs to a different module`);
-        checkResults(target.results, what);
-        if (args.length !== target.params.length) {
-          fail(`${what}: ${target.debugName()} expects ${target.params.length} argument(s), got ${args.length}`);
-        }
-        const resolved = args.map((v, i) => resolveOperand(v, target.params[i], `${what} argument ${i + 1}`));
-        for (const r of resolved) r.consumers.push({ block: b.current });
-        b.terminate({ kind: "returnCall", func: target, args: resolved });
-        return;
-      }
-      if (target?.handleKind === "table") {
-        const what = "$.returnCall (indirect)";
-        const [type, index, ...rest] = args;
-        if (target.module !== b.module) fail(`${what}: table belongs to a different module`);
-        if (target.elemType !== funcref) {
-          fail(`${what}: call_indirect requires a funcref table, this one holds ${target.elemType.name}`);
-        }
-        if (type?.handleKind !== "functype") fail(`${what}: expected a mod.funcType handle as the signature`);
-        if (type.module !== b.module) fail(`${what}: signature belongs to a different module`);
-        checkResults(type.results, what);
-        if (rest.length !== type.params.length) {
-          fail(`${what}: signature expects ${type.params.length} argument(s), got ${rest.length}`);
-        }
-        const resolved = type.params.map((t, i) => resolveOperand(rest[i], t, `${what} argument ${i + 1}`));
-        const idx = resolveInt32(index, `${what} index`);
-        for (const r of [...resolved, idx]) r.consumers.push({ block: b.current });
-        b.terminate({ kind: "returnCallIndirect", table: target, funcType: type, index: idx, args: resolved });
-        return;
-      }
-      fail("$.returnCall: expected a function handle, or (table, funcType, index, ...args)");
     },
 
     drop(value) {
