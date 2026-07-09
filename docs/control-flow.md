@@ -20,7 +20,7 @@ dominator analysis and a relooper back to structured wasm
   index, lowering to `br_table`.
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 mod.function([s32], [s32]).export("sum").body((n, $) => {
@@ -45,12 +45,12 @@ from outside it is legal — the target simply becomes a merge point.
 ### Irreducible control flow just works
 
 Arbitrary gotos can produce loops with multiple entry points — control flow
-no structured language can express directly. wasmemit lowers it automatically
+no structured language can express directly. wasmloom lowers it automatically
 (node splitting, with a dispatch-loop fallback for pathological shapes)
 rather than rejecting it:
 
 ```js
-import { Module, s32, bool } from "wasmemit";
+import { Module, s32, bool } from "wasmloom";
 
 const mod = new Module();
 // a loop entered at two different points, depending on the argument
@@ -75,7 +75,7 @@ if (instance.exports.f(0) !== 10 || instance.exports.f(42) !== 42) throw new Err
 Each callback receives a fresh `$` (same function, same labels in scope):
 
 ```js
-import { Module, s32, bool } from "wasmemit";
+import { Module, s32, bool } from "wasmloom";
 
 const mod = new Module();
 mod.function([s32], [s32]).export("collatzSteps").body((n, $) => {

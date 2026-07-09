@@ -1,4 +1,4 @@
-# wasmemit — Handoff
+# wasmloom — Handoff
 
 State snapshot for picking this project back up. Last updated: 2026-07-08.
 
@@ -134,7 +134,7 @@ done. Remaining items are pinned:
 
 ## Working conventions
 
-- Repo: github.com/asterick/wasmemit (private). Commit style: imperative
+- Repo: github.com/asterick/wasmloom (private). Commit style: imperative
   summary + body, Claude co-author trailer.
 - **main is protected — never commit to it directly.** Two repo rulesets:
   "pr-and-review" (PR required, 1 code-owner review — CODEOWNERS:

@@ -9,7 +9,7 @@ and [segment offsets](memory.md#data-segments) to *constant expressions*.
 This proposal adds integer `add`/`sub`/`mul` to that grammar — enough to
 derive layouts from an imported base at instantiation time.
 
-In wasmemit, the same constructors do double duty — **context decides**:
+In wasmloom, the same constructors do double duty — **context decides**:
 inside a function body, `s32.add` is the ordinary runtime op; outside any
 body, it builds a constant expression. Operands there must be constants,
 **immutable** module variables, or other constant expressions
@@ -17,7 +17,7 @@ body, it builds a constant expression. Operands there must be constants,
 as usual):
 
 ```js
-import { Module, s32, u32 } from "wasmemit";
+import { Module, s32, u32 } from "wasmloom";
 
 const mod = new Module();
 const base = mod.variable(s32).import("env", "base").immutable();
@@ -57,7 +57,7 @@ The same trees serve as `.at()` offsets for
 region relative to an imported allocation base:
 
 ```js
-import { Module, u32 } from "wasmemit";
+import { Module, u32 } from "wasmloom";
 
 const mod = new Module();
 const base = mod.variable(u32).import("env", "base").immutable();

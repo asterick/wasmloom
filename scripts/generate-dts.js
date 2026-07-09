@@ -91,7 +91,7 @@ export function generateDts() {
   push("");
   push("/** A single-value expression of builder-level type T. */");
   push("export interface Expr<T extends TypeTag = TypeTag> {");
-  push("  readonly __wasmemit: T;");
+  push("  readonly __wasmloom: T;");
   push("}");
   push("");
   push("/** Safe value-exact promotion: what an operand slot of type T accepts. */");
@@ -255,7 +255,7 @@ export function generateDts() {
   push("  emit(): Uint8Array;");
   push("}");
   push("");
-  push("export class WasmEmitError extends Error {}");
+  push("export class WasmLoomError extends Error {}");
   push("");
 
   // Namespace interfaces from the registry.

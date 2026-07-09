@@ -4,14 +4,14 @@
 Emitted modules need Node ≥ 22 / Chrome ≥ 120 — only when a module actually
 declares more than one memory.*
 
-Declare as many memories as you like — because every wasmemit
+Declare as many memories as you like — because every wasmloom
 [load/store takes its memory handle explicitly](memory.md), multi-memory adds
 **no new API**. The handle routes each access; imported memories index before
 defined ones, and single-memory modules encode byte-identically to how they
 always did.
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 const heap = mod.memory({ min: 1 }).export("heap");
@@ -40,7 +40,7 @@ targets whichever memory you name.
 **destination**, `opts.from` names the source memory.
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 const a = mod.memory({ min: 1 }).export("a");

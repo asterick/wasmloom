@@ -3,10 +3,10 @@
 [← Manual index](index.md)
 
 wasm has four numeric storage types (`i32`, `i64`, `f32`, `f64`) and leaves
-signedness to each instruction. wasmemit inverts that: **signedness lives in
+signedness to each instruction. wasmloom inverts that: **signedness lives in
 the type**, and the type picks the instruction.
 
-| wasmemit type | wasm storage | notes |
+| wasmloom type | wasm storage | notes |
 |---|---|---|
 | `s32`, `u32` | `i32` | signed/unsigned 32-bit views |
 | `s64`, `u64` | `i64` | signed/unsigned 64-bit views; JS side is `BigInt` |
@@ -39,7 +39,7 @@ carries its own logic (`and`/`or`/`xor`/`not`); like `select`, these are
 values, not short-circuiting control flow.
 
 ```js
-import { Module, s32, bool } from "wasmemit";
+import { Module, s32, bool } from "wasmloom";
 
 const mod = new Module();
 mod.function([s32, s32], [s32]).export("both").body((a, b, $) => {

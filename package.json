@@ -1,7 +1,7 @@
 {
-  "name": "wasmemit",
+  "name": "wasmloom",
   "version": "0.0.0",
-  "description": "A JavaScript module for generating WebAssembly modules using expression builders",
+  "description": "Weave WebAssembly binaries from JavaScript expression builders — no toolchain, zero dependencies",
   "type": "module",
   "main": "src/index.js",
   "types": "index.d.ts",
@@ -26,7 +26,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/asterick/wasmemit.git"
+    "url": "git+https://github.com/asterick/wasmloom.git"
   },
   "engines": {
     "node": ">=18"

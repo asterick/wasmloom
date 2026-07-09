@@ -5,10 +5,10 @@
 ## Install
 
 ```sh
-npm install wasmemit
+npm install wasmloom
 ```
 
-wasmemit is a single ES module with zero dependencies. Emitting works on
+wasmloom is a single ES module with zero dependencies. Emitting works on
 Node ≥ 18 and in any browser; the emitted module's engine requirements depend
 on [which features it uses](index.md#feature-and-engine-matrix).
 
@@ -19,7 +19,7 @@ result type lists, given bodies via a callback, and wired to the outside world
 with chained `.import()` / `.export()`:
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 
@@ -57,7 +57,7 @@ time ([Errors and debugging](errors.md)).
 
 ## Reading the type names
 
-wasmemit's types put signedness first: `s32`/`u32`/`s64`/`u64` are *views* of
+wasmloom's types put signedness first: `s32`/`u32`/`s64`/`u64` are *views* of
 wasm's `i32`/`i64`, and the view picks the instruction — `u32.div` emits
 `i32.div_u`, `s32.div` emits `i32.div_s`. Comparisons produce a first-class
 `bool`, and conditions require it. The full rules, including which operand

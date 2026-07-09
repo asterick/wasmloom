@@ -7,7 +7,7 @@ pages). Loads and stores take the memory handle explicitly, so code reads the
 same whether a module has one memory or [several](multi-memory.md).
 
 ```js
-import { Module, s32, u32 } from "wasmemit";
+import { Module, s32, u32 } from "wasmloom";
 
 const mod = new Module();
 const mem = mod.memory({ min: 1 }).export("mem");
@@ -56,7 +56,7 @@ material for `mem.init`. Chain `.at(mem, offset)` to make one **active**
 [constant arithmetic](extended-const.md#segment-offsets) over those:
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 const mem = mod.memory({ min: 1 }).export("mem");

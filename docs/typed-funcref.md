@@ -29,7 +29,7 @@ reference types agree everywhere.
 null at run time):
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 const sig = mod.funcType([s32], [s32]);
@@ -58,13 +58,13 @@ subtyping is modeled as
 automatically — so typed refs drop into existing
 [`funcref` tables and variables](tables.md) unchanged. There are **no
 downcasts**: `funcref` → typed requires the GC proposal's casts, which
-wasmemit doesn't target. Going nullable → non-null is a *checked* bridge,
+wasmloom doesn't target. Going nullable → non-null is a *checked* bridge,
 priced like [`bool.of`](types.md#bool-is-a-barrier):
 
 - `sig.ref.of(x)` — asserts non-null (`ref.as_non_null`), trapping on null.
 
 ```js
-import { Module, s32, bool } from "wasmemit";
+import { Module, s32, bool } from "wasmloom";
 
 const mod = new Module();
 const sig = mod.funcType([], [s32]);
@@ -100,7 +100,7 @@ function's signature at declaration. Non-null *tables* are rejected (they'd
 have no default value) — use `sig.refNull`.
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 const sig = mod.funcType([s32], [s32]);

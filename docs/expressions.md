@@ -17,7 +17,7 @@ is computed in the emitted code, and they're pinned by a differential fuzzer:
    yourself.
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 const noisy = mod.function([], [s32]).import("env", "tick");
@@ -57,7 +57,7 @@ containing a read inlines at its consumption point, so it sees writes made in
 between.
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 mod.function([s32], [s32]).export("f").body((x, $) => {
@@ -75,7 +75,7 @@ a variable at that moment; the initializer is a statement and executes right
 there:
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 mod.function([s32], [s32]).export("f").body((x, $) => {

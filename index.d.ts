@@ -12,7 +12,7 @@ export type TypeTag = TypeName | RefBrand;
 
 /** A single-value expression of builder-level type T. */
 export interface Expr<T extends TypeTag = TypeTag> {
-  readonly __wasmemit: T;
+  readonly __wasmloom: T;
 }
 
 /** Safe value-exact promotion: what an operand slot of type T accepts. */
@@ -196,7 +196,7 @@ export class Module {
   emit(): Uint8Array;
 }
 
-export class WasmEmitError extends Error {}
+export class WasmLoomError extends Error {}
 
 export interface Ns_s32 extends WasmType<"s32"> {
   const(value: number): Expr<"s32">;

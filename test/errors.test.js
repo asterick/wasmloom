@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, s64, u64, f32, f64, bool, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, s64, u64, f32, f64, bool, WasmLoomError } from "../src/index.js";
 
-const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmEmitError && re.test(e.message));
+const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmLoomError && re.test(e.message));
 
 test("type mismatch throws at the call site", () => {
   const mod = new Module();
@@ -205,9 +205,9 @@ test("debug mode includes creation site in errors", () => {
   const f = mod.function([], [s32]).import("env", "f");
   try {
     mod.function([], []).body(($) => { f.call(); });
-    assert.fail("expected a WasmEmitError");
+    assert.fail("expected a WasmLoomError");
   } catch (e) {
-    assert.ok(e instanceof WasmEmitError);
+    assert.ok(e instanceof WasmLoomError);
     assert.match(e.message, /Created at:/);
     assert.match(e.message, /errors\.test\.js/);
   }
