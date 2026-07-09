@@ -203,6 +203,7 @@ op("select", "select", 0x1b, ["t", "t", "i32"], ["t"], { select: true });
 
 // --- references ---
 op("ref", "is_null", 0xd1, ["ref"], ["i32"]);
+op("ref", "as_non_null", 0xd4, ["ref"], ["ref"]);
 
 // --- tables (immediate encoding via `imm`) ---
 op("table", "get", 0x25, ["i32"], ["ref"], { imm: "table" });
@@ -416,6 +417,9 @@ export const OPS = {
   call_indirect: 0x11,
   return_call: 0x12,
   return_call_indirect: 0x13,
+  call_ref: 0x14,
+  return_call_ref: 0x15,
+  ref_as_non_null: 0xd4,
   select_typed: 0x1c,
   ref_null: 0xd0,
   ref_func: 0xd2,

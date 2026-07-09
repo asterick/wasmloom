@@ -42,7 +42,7 @@ that creates them.
 
 The full **WebAssembly 2.0** surface — numerics, multi-value, bulk memory,
 reference types and tables, sign-extension, nontrapping conversions, and
-fixed-width **SIMD** — plus, from **wasm 3.0**:
+fixed-width **SIMD** — plus, from **wasm 3.0** (Node ≥ 22 to run):
 
 - **Multiple memories** — declare any number; every load/store already takes
   its memory handle, and `mem.copy(dst, src, len, { from })` copies across.
@@ -52,6 +52,12 @@ fixed-width **SIMD** — plus, from **wasm 3.0**:
 - **Extended constant expressions** — `add`/`sub`/`mul` built outside a body
   compose immutable globals into initializers and data/element offsets:
   `mod.variable(s32, s32.add(base, s32.const(16)))`.
+- **Typed function references** — every signature handle carries `sig.ref`
+  (non-null) and `sig.refNull` types; `fn.ref()` is precisely typed and
+  upcasts by promotion; `sig.call(ref, …)` emits `call_ref` (no table, no
+  runtime signature check), tail-calling in return position. Tables of
+  `sig.refNull` make checked-free vtables: `sig.call(vt.get(i), x)`.
+  `sig.ref.of(x)` is the trapping nullable→non-null bridge.
 
 ## Type discipline
 

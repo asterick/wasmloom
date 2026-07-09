@@ -7,9 +7,10 @@ State snapshot for picking this project back up. Last updated: 2026-07-08.
 A JavaScript library for generating WebAssembly binaries via expression
 builders — no external toolchain, `mod.emit()` → `Uint8Array`. The whole
 Wasm 2.0 surface is implemented, **including fixed-width SIMD**, plus
-multiple memories, extended constant expressions, and tail calls from
-wasm 3.0. 205 tests, all passing (`npm test`, Node ≥ 18 — the wasm 3.0
-features need a newer engine, Node ≥ 22 in practice; zero dependencies).
+multiple memories, extended constant expressions, tail calls, and typed
+function references from wasm 3.0. 218 tests, all passing (`npm test`,
+Node ≥ 18 — the wasm 3.0 features need a newer engine, Node ≥ 22 in
+practice; zero dependencies).
 
 **`DESIGN.md` is the contract.** Every API shape in it was explicitly
 ratified in planning discussions with Bryon. Do not implement new
@@ -97,6 +98,9 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
 - `memory-sweep` — all load/store variants vs DataView; bulk-op semantics.
 - `simd` — behavioral: masks end-to-end, shape-barrier errors, casts,
   v128 variables/globals, lane memory ops, shuffle/swizzle.
+- `typedref` — typed function references: call_ref through params/globals/
+  locals/tables, interning identity, promotion directions, the .of bridge
+  and null traps, nullable-slot lowering, return_call_ref by depth.
 - `constexpr` — extended constant expressions: init/offset arithmetic,
   preceding-global refs, promotion of const operands, eager and emit-time
   error paths. Tail calls live in `control`: IMPLICIT — `$.return(f.call())`

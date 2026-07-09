@@ -2,6 +2,7 @@ import { fail } from "./errors.js";
 import { OPTABLE } from "./optable.js";
 import {
   i32 as I32, i64 as I64, f32, f64, s32, u32, s64, u64, bool, funcref, externref, isRef, isVec,
+  makeTypedRefs,
   s8x16, u8x16, s16x8, u16x8, s32x4, u32x4, s64x2, u64x2, f32x4, f64x2, m8x16, m16x8, m32x4, m64x2,
 } from "./types.js";
 import { makeNode, resolveOperand, setCoercion } from "./node.js";
@@ -424,8 +425,36 @@ function buildRefNamespace(T) {
 buildRefNamespace(funcref);
 buildRefNamespace(externref);
 
+/**
+ * Typed function references (wasm 3.0): build `sig.ref` / `sig.refNull` for a
+ * funcType handle. The nullable side carries `null()`/`is_null` like funcref;
+ * `sig.ref.of(x)` is the checked nullable→non-null bridge (ref.as_non_null,
+ * traps on null). Upcasts — ref→refNull of the same signature, and any typed
+ * ref→funcref — are value-exact promotions; there is no downcast.
+ */
+export function attachTypedRefs(sig, id) {
+  const { ref, refNull } = makeTypedRefs(sig, id);
+  refNull.null = () => makeNode("const", { type: refNull, results: [refNull], value: null });
+  refNull.is_null = (x) => {
+    const what = `${refNull.name}.is_null`;
+    const v = resolveOperand(x, refNull, what);
+    return makeNode("op", { results: [bool], entry: entryOf("ref.is_null"), operands: [v], display: what });
+  };
+  ref.of = (x) => {
+    const what = `${ref.name}.of`;
+    const v = resolveOperand(x, refNull, what); // non-null promotes in; the check is then a no-op
+    return makeNode("op", { results: [ref], entry: entryOf("ref.as_non_null"), operands: [v], display: what });
+  };
+  sig.ref = ref;
+  sig.refNull = refNull;
+}
+VENEER_OPS.push({ ns: "ref", name: "as_non_null", params: [funcref], results: [funcref], entry: entryOf("ref.as_non_null"), mem: "ref" });
+
 /** Zero-initialization value for a type: null for references, zero otherwise. */
 export function defaultInit(type) {
+  if (type.noDefault) {
+    fail(`a ${type.name} variable has no default value (non-null references) — give it an initializer`);
+  }
   if (isVec(type)) return makeNode("const", { type, results: [type], value: new Uint8Array(16) });
   return isRef(type) ? type.null() : type.const(type.zero);
 }
@@ -946,6 +975,11 @@ const PROMOTIONS = new Map([
 ]);
 
 setCoercion((v, expected, builder) => {
+  // Typed function reference upcasts are subtyping — value-exact, zero-cost.
+  if (expected === funcref && v.type.heapType) return retype(v, funcref);
+  if (expected.heapType && !expected.nonNull && v.type.nullableTwin === expected) {
+    return retype(v, expected);
+  }
   const spec = PROMOTIONS.get(expected)?.get(v.type);
   if (spec === "retype") return retype(v, expected);
   if (spec) {

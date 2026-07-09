@@ -68,11 +68,31 @@ export const m64x2 = vec("m64x2", 2);
 export const funcref = new ValType("funcref", 0x70, null);
 export const externref = new ValType("externref", 0x6f, null);
 
-/** Storage types in canonical local-pool order. */
+/**
+ * Typed function references (wasm 3.0): `(ref $sig)` / `(ref null $sig)`,
+ * created per funcType handle. `heapType` points back at the handle — the
+ * encoder writes code + the handle's interned type index. Non-null types
+ * have no default value; their local slots are lowered to the nullable twin
+ * with ref.as_non_null on read (see the encoder).
+ */
+export function makeTypedRefs(sig, id) {
+  const ref = new ValType(`(ref fn#${id})`, 0x64, null);
+  const refNull = new ValType(`(ref null fn#${id})`, 0x63, null);
+  for (const t of [ref, refNull]) {
+    t.heapType = sig;
+    t.wasmType = t;
+  }
+  ref.nonNull = true;
+  ref.nullableTwin = refNull;
+  ref.noDefault = true;
+  return { ref, refNull };
+}
+
+/** Storage types in canonical local-pool order (typed refs pool dynamically). */
 export const valtypes = [i32, i64, f32, f64, v128, funcref, externref];
 
 export function isRef(t) {
-  return t === funcref || t === externref;
+  return t === funcref || t === externref || t.heapType !== undefined;
 }
 
 export function isVec(t) {

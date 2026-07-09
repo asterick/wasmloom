@@ -99,6 +99,8 @@ export function reloop(builder, cfg, code) {
         return [{ op: "return" }];
       case "returnCall":
         return [{ op: "return_call", fn: t.func }];
+      case "returnCallRef":
+        return [{ op: "return_call_ref", type: t.funcType }];
       case "returnCallIndirect":
         return [{ op: "return_call_indirect", type: t.funcType, table: t.table }];
       case "unreachable":

@@ -34,7 +34,7 @@ function rewriteTailCall(block, out) {
   while (i > 0 && out[i - 1].k === "set") sets.push(out[--i]);
   if (gets.length !== sets.length) return;
   const call = i > 0 ? out[i - 1] : null;
-  if (!call || (call.k !== "call" && call.k !== "call_indirect")) return;
+  if (!call || (call.k !== "call" && call.k !== "call_indirect" && call.k !== "call_ref")) return;
   const results = call.k === "call" ? call.fn.results.length : call.type.results.length;
   if (gets.length > 0 && results !== gets.length) return;
   if (t.values.length !== results) return;
@@ -44,8 +44,8 @@ function rewriteTailCall(block, out) {
     if (sets[j].v !== gets[gets.length - 1 - j].v) return;
   }
   out.length = i - 1; // drop the call and the dead spill writes/reads
-  block.term = call.k === "call"
-    ? { kind: "returnCall", func: call.fn }
+  block.term = call.k === "call" ? { kind: "returnCall", func: call.fn }
+    : call.k === "call_ref" ? { kind: "returnCallRef", funcType: call.type }
     : { kind: "returnCallIndirect", funcType: call.type, table: call.table };
 }
 
@@ -138,6 +138,7 @@ export function linearize(builder, cfg) {
             case "op":
             case "call":
             case "call_indirect":
+            case "call_ref":
             case "set":
             case "drop":
             case "cast":
@@ -169,7 +170,9 @@ export function linearize(builder, cfg) {
               break;
             case "call":
             case "call_indirect":
+            case "call_ref":
               if (node.kind === "call") out.push({ k: "call", fn: node.func });
+              else if (node.kind === "call_ref") out.push({ k: "call_ref", type: node.funcType });
               else out.push({ k: "call_indirect", type: node.funcType, table: node.table });
               if (node.spillTemps) {
                 for (let i = node.spillTemps.length - 1; i >= 0; i--) {

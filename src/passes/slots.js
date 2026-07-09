@@ -13,8 +13,14 @@ export function allocateSlots(builder, code, liveOut, cfg) {
 
   // Interference: at each def, the defined vlocal conflicts with everything
   // else live at that point. Pooling is by wasm storage type — s32 and u32
-  // share the i32 pool (signedness is a builder-level fiction).
-  const st = (v) => v.type.wasmType;
+  // share the i32 pool (signedness is a builder-level fiction). Non-null
+  // typed references pool with their nullable twin: the slot is declared
+  // nullable and reads re-assert non-null (see the encoder).
+  const st = (v) => {
+    const t = v.type;
+    if (t.heapType) return t.nonNull ? t.nullableTwin : t;
+    return t.wasmType;
+  };
   const adj = new Map(others.map((v) => [v, new Set()]));
   const interfere = (a, b) => {
     if (a === b || st(a) !== st(b)) return;
@@ -38,7 +44,8 @@ export function allocateSlots(builder, code, liveOut, cfg) {
   }
 
   // Greedy coloring per type, in creation order. Params occupy fixed colors
-  // below zero-indexed pools and never receive new colors.
+  // below zero-indexed pools and never receive new colors. Typed-reference
+  // pools are created on first use, after the static storage types.
   const colorOf = new Map();
   const poolSize = new Map(valtypes.map((t) => [t, 0]));
   for (const v of others) {
@@ -50,7 +57,7 @@ export function allocateSlots(builder, code, liveOut, cfg) {
     let c = 0;
     while (taken.has(c)) c++;
     colorOf.set(v, c);
-    if (c + 1 > poolSize.get(st(v))) poolSize.set(st(v), c + 1);
+    if (c + 1 > (poolSize.get(st(v)) ?? 0)) poolSize.set(st(v), c + 1);
   }
 
   // Map colors to final slot numbers: params first, then per-type pools.
@@ -58,7 +65,7 @@ export function allocateSlots(builder, code, liveOut, cfg) {
   const poolBase = new Map();
   let base = paramCount;
   const localsDecl = [];
-  for (const t of valtypes) {
+  for (const t of poolSize.keys()) {
     const n = poolSize.get(t);
     if (n > 0) {
       poolBase.set(t, base);

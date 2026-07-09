@@ -130,8 +130,8 @@ export function encodeModule(module) {
   w.section(SECTION.type, (s) => {
     s.vec(typeList, (sw, t) => {
       sw.u8(OPS.functype);
-      sw.vec(t.params, (x, p) => x.u8(p.code));
-      sw.vec(t.results, (x, r) => x.u8(r.code));
+      sw.vec(t.params, (x, p) => writeValType(x, p));
+      sw.vec(t.results, (x, r) => writeValType(x, r));
     });
   });
 
@@ -139,7 +139,7 @@ export function encodeModule(module) {
     ...importedFns.map((f) => ({ info: f.importInfo, write: (s) => s.u8(0x00).u32(f.typeIndex) })),
     ...importedTables.map((t) => ({
       info: t.importInfo,
-      write: (s) => { s.u8(0x01).u8(t.elemType.code); writeLimits(s, t.limits); },
+      write: (s) => { s.u8(0x01); writeValType(s, t.elemType); writeLimits(s, t.limits); },
     })),
     ...importedMems.map((m) => ({
       info: m.importInfo,
@@ -147,7 +147,7 @@ export function encodeModule(module) {
     })),
     ...importedGlobals.map((g) => ({
       info: g.importInfo,
-      write: (s) => s.u8(0x03).u8(g.type.code).u8(g.mutable ? 1 : 0),
+      write: (s) => { s.u8(0x03); writeValType(s, g.type); s.u8(g.mutable ? 1 : 0); },
     })),
   ];
 
@@ -167,7 +167,7 @@ export function encodeModule(module) {
   w.section(SECTION.table, (s) => {
     if (definedTables.length === 0) return;
     s.vec(definedTables, (sw, t) => {
-      sw.u8(t.elemType.code);
+      writeValType(sw, t.elemType);
       writeLimits(sw, t.limits);
     });
   });
@@ -180,7 +180,8 @@ export function encodeModule(module) {
   w.section(SECTION.global, (s) => {
     if (definedGlobals.length === 0) return;
     s.vec(definedGlobals, (sw, g) => {
-      sw.u8(g.type.code).u8(g.mutable ? 1 : 0);
+      writeValType(sw, g.type);
+      sw.u8(g.mutable ? 1 : 0);
       if (g.init.kind === "global") {
         sw.u8(OPS.global_get).u32(g.init.variable.index);
       } else if (g.init.kind === "constexpr") {
@@ -298,6 +299,17 @@ function isZeroConst(item) {
   }
 }
 
+/** A value type: one byte, or ref/refnull code + interned type index. */
+function writeValType(s, t) {
+  s.u8(t.code);
+  if (t.heapType) s.s32(t.heapType.typeIndex);
+}
+
+/** Non-param locals of non-null ref type live in nullable slots. */
+function needsNonNullAssert(vlocal) {
+  return vlocal.type.nonNull === true && vlocal.kind !== "param";
+}
+
 function writeLimits(s, limits) {
   if (limits.max !== undefined) s.u8(0x01).u32(limits.min).u32(limits.max);
   else s.u8(0x00).u32(limits.min);
@@ -318,7 +330,12 @@ function writeConst(s, node) {
     case "externref":
       s.u8(OPS.ref_null).u8(node.type.code);
       break;
-    default: fail(`internal: cannot encode const of ${node.type.name}`);
+    default:
+      if (node.type.heapType) { // typed ref.null: heap type is the type index
+        s.u8(OPS.ref_null).s32(node.type.heapType.typeIndex);
+        break;
+      }
+      fail(`internal: cannot encode const of ${node.type.name}`);
   }
 }
 
@@ -354,11 +371,13 @@ function writeConstExpr(s, node) {
 
 /** One element segment, picking the tightest encoding flavor. */
 function writeElemSegment(s, seg) {
+  const typed = seg.active?.table.elemType.heapType;
   const exprForm = seg.items.some((f) => f === null);
   const funcVec = () => s.vec(seg.items, (sw, f) => sw.u32(f.index));
   const exprVec = () =>
     s.vec(seg.items, (sw, f) => {
       if (f) sw.u8(OPS.ref_func).u32(f.index);
+      else if (typed) sw.u8(OPS.ref_null).s32(typed.typeIndex);
       else sw.u8(OPS.ref_null).u8(0x70);
       sw.u8(OPS.end);
     });
@@ -367,7 +386,13 @@ function writeElemSegment(s, seg) {
     funcVec();
   } else if (seg.active) {
     const t = seg.active.table;
-    if (t.index === 0 && !exprForm) {
+    if (typed) {
+      // typed tables always take the explicit-reftype expression form
+      s.u32(6).u32(t.index);
+      writeConstOffset(s, seg.active.offset);
+      writeValType(s, t.elemType);
+      exprVec();
+    } else if (t.index === 0 && !exprForm) {
       s.u32(0);
       writeConstOffset(s, seg.active.offset);
       funcVec();
@@ -396,14 +421,15 @@ function writeElemSegment(s, seg) {
 }
 
 function writeBody(w, { tree, slotOf, localsDecl }) {
-  w.vec(localsDecl, (s, d) => s.u32(d.count).u8(d.type.code));
+  w.vec(localsDecl, (s, d) => { s.u32(d.count); writeValType(s, d.type); });
   writeSeq(w, tree, slotOf);
   // Every CFG block ends in an explicit transfer, so control never actually
   // falls off the end — but when the last item is structured (if/loop/block),
   // the validator still types the fallthrough. Cap it as unreachable.
   const last = tree[tree.length - 1];
   const diverges = last &&
-    ["return", "unreachable", "br", "br_table", "return_call", "return_call_indirect"].includes(last.op);
+    ["return", "unreachable", "br", "br_table", "return_call", "return_call_indirect", "return_call_ref"]
+      .includes(last.op);
   if (!diverges) w.u8(OPS.unreachable);
   w.u8(OPS.end);
 }
@@ -415,6 +441,7 @@ function writeSeq(w, items, slotOf) {
     // Peephole: `set s; get s` (same slot) is exactly local.tee.
     if (item.k === "set" && next?.k === "get" && slotOf.get(item.v) === slotOf.get(next.v)) {
       w.u8(OPS.local_tee).u32(slotOf.get(item.v));
+      if (needsNonNullAssert(next.v)) w.u8(OPS.ref_as_non_null);
       i++;
       continue;
     }
@@ -455,7 +482,13 @@ function writeItem(w, item, slotOf) {
     case "unreachable": w.u8(OPS.unreachable); break;
     // linear instrs
     case "const": writeConst(w, item); break;
-    case "get": w.u8(OPS.local_get).u32(slotOf.get(item.v)); break;
+    case "get":
+      w.u8(OPS.local_get).u32(slotOf.get(item.v));
+      // Non-null ref slots are declared nullable (wasm's structural
+      // definite-assignment rules don't fit relooped output); reads
+      // re-assert non-null. Params keep their true type — no assert.
+      if (needsNonNullAssert(item.v)) w.u8(OPS.ref_as_non_null);
+      break;
     case "set": w.u8(OPS.local_set).u32(slotOf.get(item.v)); break;
     case "gget": w.u8(OPS.global_get).u32(item.g.index); break;
     case "gset": w.u8(OPS.global_set).u32(item.g.index); break;
@@ -491,8 +524,10 @@ function writeItem(w, item, slotOf) {
       break;
     case "call": w.u8(OPS.call).u32(item.fn.index); break;
     case "call_indirect": w.u8(OPS.call_indirect).u32(item.type.typeIndex).u32(item.table.index); break;
+    case "call_ref": w.u8(OPS.call_ref).u32(item.type.typeIndex); break;
     case "return_call": w.u8(OPS.return_call).u32(item.fn.index); break;
     case "return_call_indirect": w.u8(OPS.return_call_indirect).u32(item.type.typeIndex).u32(item.table.index); break;
+    case "return_call_ref": w.u8(OPS.return_call_ref).u32(item.type.typeIndex); break;
     case "reffunc": w.u8(OPS.ref_func).u32(item.fn.index); break;
     case "drop": w.u8(OPS.drop); break;
     default: fail(`internal: cannot encode item ${item.op ?? item.k}`);

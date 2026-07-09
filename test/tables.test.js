@@ -252,8 +252,8 @@ test("reference guardrails", async () => {
   const ftbl = mod.table(funcref, { min: 1 });
   const sig = mod.funcType([], []);
   const f = mod.function([], []).body(() => {});
-  throws(() => mod.elem([f]).at(etbl, 0), /must be funcref-typed/);
-  throws(() => mod.table(s32, { min: 1 }), /funcref or externref/);
+  throws(() => mod.elem([f]).at(etbl, 0), /funcref- or sig\.refNull-typed/);
+  throws(() => mod.table(s32, { min: 1 }), /funcref, externref, or a typed reference/);
   mod.function([funcref, externref, s32], []).body((fr, er, x, $) => {
     throws(() => etbl.call(sig, s32.const(0)), /requires a funcref table/);
     throws(() => tblA.call(sig, s32.const(0)), /different module/);
@@ -266,6 +266,6 @@ test("reference guardrails", async () => {
     throws(() => bool.of(fr), /expected an integer/);
   });
   // default zero-init for ref variables is null (checked behaviorally above);
-  // and a funcref variable can't hold an externref
-  throws(() => mod.variable(funcref, null).immutable() && mod.variable(externref, f.ref()), /expected externref, got funcref/);
+  // and a function reference never lifts into an externref variable
+  throws(() => mod.variable(funcref, null).immutable() && mod.variable(externref, f.ref()), /expected externref, got \(ref/);
 });

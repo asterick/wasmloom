@@ -5,8 +5,8 @@ import { makeNode, resolveOperand, Node } from "./node.js";
 import { Variable } from "./variable.js";
 import { FunctionBuilder } from "./builder.js";
 import { encodeModule } from "./encode/encoder.js";
-import { MEMORY_OPS, TABLE_OPS, promoteConst, defaultInit, resolveInt32, forEachConstRef } from "./expr.js";
-import { funcref, externref, isRef, isVec } from "./types.js";
+import { MEMORY_OPS, TABLE_OPS, promoteConst, defaultInit, resolveInt32, forEachConstRef, attachTypedRefs } from "./expr.js";
+import { funcref, externref, isRef, isVec, typeKey } from "./types.js";
 
 /** Handle for a declared function. Declare first; attach `.body()` or `.import()` later. */
 export class FunctionHandle {
@@ -79,7 +79,15 @@ export class FunctionHandle {
    */
   ref() {
     this.module.refFunctions.add(this);
-    return makeNode("reffunc", { type: funcref, results: [funcref], func: this });
+    // ref.func produces the precise non-null type; upcasts to funcref or the
+    // nullable form are value-exact promotions at the point of use.
+    const t = this.type.ref;
+    return makeNode("reffunc", { type: t, results: [t], func: this });
+  }
+
+  /** This function's signature as an interned funcType handle. */
+  get type() {
+    return this.module._internFuncType(this.params, this.results);
   }
 
   /**
@@ -158,14 +166,47 @@ export class MemoryHandle {
   }
 }
 
-/** A reusable function signature, interned into the type section. */
+/**
+ * A reusable function signature, interned into the type section — one handle
+ * per distinct signature per module (so `fn.ref()` and a user-declared
+ * signature agree on the typed reference types `sig.ref`/`sig.refNull`).
+ */
 export class FuncTypeHandle {
-  constructor(module, params, results) {
+  constructor(module, params, results, id) {
     this.handleKind = "functype";
     this.module = module;
     this.params = params;
     this.results = results;
     this.typeIndex = -1; // assigned at emit
+    attachTypedRefs(this, id);
+  }
+
+  /** call_ref: call through a typed reference of this signature (traps on null). */
+  call(ref, ...args) {
+    const what = "sig.call()";
+    const b = requireBuilder(what);
+    if (this.module !== b.module) fail(`${what}: signature belongs to a different module`);
+    if (args.length !== this.params.length) {
+      fail(`${what}: signature expects ${this.params.length} argument(s), got ${args.length}`);
+    }
+    const operands = this.params.map((t, i) => resolveOperand(args[i], t, `${what} argument ${i + 1}`));
+    const r = resolveOperand(ref, null, `${what} reference`);
+    if (r.type !== this.ref && r.type !== this.refNull) {
+      fail(`${what}: expected a ${this.ref.name} or ${this.refNull.name}, got ${r.type.name}`);
+    }
+    operands.push(r); // args, then the reference, on the stack
+    const anchor = this.results.length !== 1;
+    const node = makeNode(
+      "call_ref",
+      { results: this.results, funcType: this, operands, display: what },
+      { anchor },
+    );
+    if (this.results.length === 0) return undefined;
+    if (this.results.length === 1) return node;
+    node.spillTemps = this.results.map((t) => b.newVLocal(t, "temp"));
+    return this.results.map(
+      (t, i) => new Variable("function", t, { builder: b, vlocal: node.spillTemps[i] }),
+    );
   }
 }
 
@@ -285,8 +326,16 @@ export class ElemSegment {
     if (table?.handleKind !== "table" || table.module !== this.module) {
       fail(".at(): expected a table handle from this module");
     }
-    if (table.elemType !== funcref) {
-      fail(".at(): element segments hold funcref — the table must be funcref-typed");
+    const et = table.elemType;
+    if (et !== funcref && !et.heapType) {
+      fail(".at(): element segments hold function references — the table must be funcref- or sig.refNull-typed");
+    }
+    if (et.heapType) {
+      for (const f of this.items) {
+        if (f !== null && f.type !== et.heapType) {
+          fail(`.at(): ${f.debugName()} does not have this table's signature (${et.name})`);
+        }
+      }
     }
     this.active = { table, offset: resolveDataOffset(this.module, offset) };
     return this;
@@ -392,6 +441,7 @@ export class Module {
     this.dataSegments = [];
     this.elemSegments = [];
     this.refFunctions = new Set(); // ref.func'd — auto-declared at emit
+    this._funcTypesByKey = new Map(); // signature interning (typed refs need one handle per shape)
     this.exports = [];
     this.exportNames = new Set();
     this.startFunction = null;
@@ -418,21 +468,35 @@ export class Module {
     return handle;
   }
 
-  /** Declare a reusable function signature (for call_indirect and mod.function). */
+  /**
+   * Declare a reusable function signature (for call_indirect, call_ref, and
+   * mod.function). Interned: identical signatures return the same handle.
+   */
   funcType(params, results) {
-    const handle = new FuncTypeHandle(
-      this,
+    return this._internFuncType(
       checkTypeList(params, "mod.funcType params"),
       checkTypeList(results, "mod.funcType results"),
     );
-    this.funcTypes.push(handle);
+  }
+
+  _internFuncType(params, results) {
+    const key = typeKey(params, results);
+    let handle = this._funcTypesByKey.get(key);
+    if (!handle) {
+      handle = new FuncTypeHandle(this, params, results, this.funcTypes.length);
+      this._funcTypesByKey.set(key, handle);
+      this.funcTypes.push(handle);
+    }
     return handle;
   }
 
   /** Declare a table of funcref or externref elements. Limits in elements. */
   table(elemType, limits) {
-    if (elemType !== funcref && elemType !== externref) {
-      fail("mod.table: element type must be funcref or externref");
+    if (elemType !== funcref && elemType !== externref && !elemType?.heapType) {
+      fail("mod.table: element type must be funcref, externref, or a typed reference (sig.refNull)");
+    }
+    if (elemType?.nonNull) {
+      fail("mod.table: non-null element types have no default value — use sig.refNull");
     }
     if (limits === null || typeof limits !== "object") fail("mod.table: expected { min, max? }");
     const { min, max } = limits;
@@ -536,7 +600,11 @@ function resolveModuleInit(module, type, init) {
   }
   if (init instanceof Node) {
     if (init.kind === "reffunc") {
-      if (init.type !== type) fail(`mod.variable init: expected ${type.name}, got ${init.type.name}`);
+      // upcasts (precise ref → its nullable form or funcref) are value-exact
+      const upcast = type === funcref || (type.heapType && init.type.nullableTwin === type);
+      if (init.type !== type && !upcast) {
+        fail(`mod.variable init: expected ${type.name}, got ${init.type.name}`);
+      }
       return { kind: "const", node: init };
     }
     if (init.kind === "constop") {

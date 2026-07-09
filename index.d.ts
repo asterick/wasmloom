@@ -4,8 +4,14 @@
 export type TypeName =
   "s32" | "u32" | "s64" | "u64" | "f32" | "f64" | "bool" | "funcref" | "externref" | "s8x16" | "u8x16" | "s16x8" | "u16x8" | "s32x4" | "u32x4" | "s64x2" | "u64x2" | "f32x4" | "f64x2" | "m8x16" | "m16x8" | "m32x4" | "m64x2";
 
+/** Typed function reference brand: (ref $sig) / (ref null $sig). */
+export type RefBrand<
+  P extends readonly WasmType[] = any, R extends readonly WasmType[] = any,
+  N extends boolean = boolean> = { readonly __refParams: P; readonly __refResults: R; readonly __nullable: N };
+export type TypeTag = TypeName | RefBrand;
+
 /** A single-value expression of builder-level type T. */
-export interface Expr<T extends TypeName = TypeName> {
+export interface Expr<T extends TypeTag = TypeTag> {
   readonly __wasmemit: T;
 }
 
@@ -35,7 +41,14 @@ type Accepts = {
   m32x4: "m32x4";
   m64x2: "m64x2";
 };
-export type Into<T extends TypeName> = Expr<Accepts[T]>;
+// funcref slots also take any typed function reference (upcast promotion);
+// nullable ref slots take the non-null form (structural: false <: boolean).
+export type Into<T extends TypeTag> =
+  T extends "funcref" ? Expr<"funcref"> | Expr<RefBrand>
+  : T extends keyof Accepts ? Expr<Accepts[T] & TypeName>
+  : T extends RefBrand<infer P, infer R, infer N>
+    ? (N extends true ? Expr<RefBrand<P, R, boolean>> : Expr<RefBrand<P, R, false>>)
+  : never;
 type I32ish = Expr<"s32" | "u32" | "bool">; // sign-agnostic 32-bit positions
 
 export interface MemOpts {
@@ -46,8 +59,9 @@ export interface MemOpts {
 }
 
 /** The value-level face of a type: a token for declarations. */
-export interface WasmType<T extends TypeName = TypeName> {
-  readonly name: T;
+export interface WasmType<T extends TypeTag = TypeTag> {
+  readonly name: string;
+  readonly __type?: T;
 }
 
 type NameOf<W> = W extends WasmType<infer T> ? T : never;
@@ -57,12 +71,12 @@ type CallResult<R extends readonly WasmType[]> =
   R extends readonly [] ? void : R extends readonly [WasmType<infer T>] ? Expr<T> : VarsOf<R>;
 
 /** A function-scoped variable (wasm local). Reads by using it as a value. */
-export interface Var<T extends TypeName = TypeName> extends Expr<T> {
+export interface Var<T extends TypeTag = TypeTag> extends Expr<T> {
   set(value: Into<T>): void;
 }
 
 /** A module-scoped variable (wasm global). */
-export interface Global<T extends TypeName = TypeName> extends Expr<T> {
+export interface Global<T extends TypeTag = TypeTag> extends Expr<T> {
   set(value: Into<T>): void;
   import(module: string, name: string): this;
   export(name: string): this;
@@ -98,13 +112,32 @@ export interface Func<P extends readonly WasmType[] = WasmType[], R extends read
   body(cb: (...args: [...VarsOf<P>, Ctx<R>]) => void): this;
   import(module: string, name: string): this;
   export(name: string): this;
-  ref(): Expr<"funcref">;
+  /** Precise non-null reference (ref $sig); upcasts are promotions. */
+  ref(): Expr<RefBrand<P, R, false>>;
+  /** This function's signature as an interned funcType handle. */
+  readonly type: FuncType<P, R>;
   call(...args: IntoArgs<P>): CallResult<R>;
 }
 
+export interface NonNullRefType<P extends readonly WasmType[], R extends readonly WasmType[]>
+  extends WasmType<RefBrand<P, R, false>> {
+  /** Checked nullable→non-null bridge (ref.as_non_null — traps on null). */
+  of(x: Expr<RefBrand<P, R, boolean>>): Expr<RefBrand<P, R, false>>;
+}
+export interface NullableRefType<P extends readonly WasmType[], R extends readonly WasmType[]>
+  extends WasmType<RefBrand<P, R, true>> {
+  null(): Expr<RefBrand<P, R, true>>;
+  is_null(x: Expr<RefBrand<P, R, boolean>>): Expr<"bool">;
+}
 export interface FuncType<P extends readonly WasmType[] = WasmType[], R extends readonly WasmType[] = WasmType[]> {
   readonly params: P;
   readonly results: R;
+  /** (ref $sig) — non-null typed function reference type. */
+  readonly ref: NonNullRefType<P, R>;
+  /** (ref null $sig). */
+  readonly refNull: NullableRefType<P, R>;
+  /** call_ref through a typed reference (traps on null). Tail in $.return. */
+  call(ref: Expr<RefBrand<P, R, boolean>>, ...args: IntoArgs<P>): CallResult<R>;
 }
 
 export interface Limits { min: number; max?: number }
@@ -119,7 +152,7 @@ export interface Memory {
   export(name: string): this;
 }
 
-export interface Table<E extends "funcref" | "externref" = "funcref"> {
+export interface Table<E extends TypeTag = "funcref"> {
   get(index: I32ish): Expr<E>;
   set(index: I32ish, value: Into<E>): void;
   size(): Expr<"u32">;
@@ -141,12 +174,12 @@ export interface DataSegment {
 }
 
 export interface ElemSegment {
-  at(table: Table, offset: ConstOffset): this;
+  at(table: Table<any>, offset: ConstOffset): this;
   drop(): void;
 }
 
-type GlobalInit<T extends TypeName> =
-  Expr<T> | Global<T> | number | bigint | boolean | readonly (number | bigint)[];
+type GlobalInit<T extends TypeTag> =
+  Into<T> | Global<T> | null | number | bigint | boolean | readonly (number | bigint)[];
 
 export class Module {
   constructor(opts?: { debug?: boolean; permissive?: boolean; tailCalls?: boolean });
@@ -155,10 +188,11 @@ export class Module {
   funcType<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): FuncType<P, R>;
   variable<W extends WasmType>(type: W, init?: GlobalInit<NameOf<W>>): Global<NameOf<W>>;
   memory(limits: Limits): Memory;
-  table<E extends WasmType<"funcref"> | WasmType<"externref">>(elemType: E, limits: Limits): Table<NameOf<E>>;
+  table<E extends WasmType<"funcref"> | WasmType<"externref"> | NullableRefType<readonly WasmType[], readonly WasmType[]>>(
+    elemType: E, limits: Limits): Table<NameOf<E>>;
   data(bytes: Uint8Array | ArrayBuffer): DataSegment;
-  elem(items: readonly (Func | null)[]): ElemSegment;
-  start(fn: Func): this;
+  elem(items: readonly (Func<any, any> | null)[]): ElemSegment;
+  start(fn: Func<any, any>): this;
   emit(): Uint8Array;
 }
 
