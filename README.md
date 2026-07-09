@@ -1,7 +1,8 @@
 # wasmemit
 
 A JavaScript module for generating WebAssembly modules using expression builders.
-Emits valid `.wasm` binaries directly, with no external toolchain.
+Emits valid `.wasm` binaries directly, with no external toolchain and zero
+dependencies. Ships generated TypeScript declarations.
 
 See [DESIGN.md](DESIGN.md) for the full design contract.
 
@@ -31,11 +32,28 @@ instance.exports.fact(5); // logs 120
 
 Control flow is built on symbolic labels (`$.label()`, `$.label.ahead()`,
 `$.goto`, `$.gotoIf`, `$.switch`) with `$.if(...).elseIf(...).else(...)` and
-`$.while` as sugar. Internally everything lowers through a CFG → liveness →
-slot allocation → relooper → encoder pipeline; expressions are type-checked
-eagerly at the builder call that creates them.
+`$.while` as sugar — including irreducible flow, which is lowered by node
+splitting (with a dispatch-loop fallback) rather than rejected. Internally
+everything lowers through a CFG → liveness → slot allocation → relooper →
+encoder pipeline; expressions are type-checked eagerly at the builder call
+that creates them.
 
-## Status
+## Coverage
+
+The full **WebAssembly 2.0** surface — numerics, multi-value, bulk memory,
+reference types and tables, sign-extension, nontrapping conversions, and
+fixed-width **SIMD** — plus, from **wasm 3.0**:
+
+- **Multiple memories** — declare any number; every load/store already takes
+  its memory handle, and `mem.copy(dst, src, len, { from })` copies across.
+- **Tail calls** — implicit: `$.return(f.call(…))` (and the indirect and
+  multi-value forms) emits `return_call`, so deep self/mutual recursion runs
+  in constant stack. Opt out with `new Module({ tailCalls: false })`.
+- **Extended constant expressions** — `add`/`sub`/`mul` built outside a body
+  compose immutable globals into initializers and data/element offsets:
+  `mod.variable(s32, s32.add(base, s32.const(16)))`.
+
+## Type discipline
 
 Signedness is first-class: `s32`/`u32`/`s64`/`u64` select the right wasm
 instruction variant (`u32.div` emits `i32.div_u`), conversions dispatch on
@@ -49,25 +67,29 @@ exactly (`f64.add(xf32, ys32)`, `s64.mul(a, b_s32)`, bool as 0/1) while
 lossy or narrowing moves always error. `new Module({ permissive: true })`
 additionally opts into same-width sign mixing and integer truthiness.
 
-Working: functions (declare/body/import/export, forward decls, mutual
-recursion), the full Wasm 2.0 numeric instruction set, module and function
-variables (globals/locals with slot reuse), auto-bound multi-use expressions,
-multi-value returns with destructuring, the full memory surface (sized
-loads/stores, mem.size/grow/fill/copy, active and passive data segments
-with mem.init/seg.drop), tables and reference types (`funcref`/`externref`,
-`fn.ref()`, `call_indirect` via `tbl.call`, element segments, the full
-`table.*` op set), start function, `T.select`, `$.switch`, `$.unreachable`,
-debug-mode creation traces.
+SIMD extends the same discipline lane-wise: ten signedness-carrying lane
+namespaces (`s8x16`…`f64x2`) over one `v128` storage, comparisons produce
+dedicated mask types (`m8x16`…`m64x2`) that `bitselect` and `all_true` /
+`any_true` / `bitmask` require, and `cast` retypes any v128 view into any
+other for free.
 
-Not yet (see the deferred list in DESIGN.md — API to be designed first):
-SIMD. Irreducible control flow is detected and
-rejected rather than lowered.
+The generated `index.d.ts` encodes all of it: parameter tuples infer the
+body callback's variable types, operand slots accept exactly the safe
+promotions, and shape/signedness barriers reject in TypeScript just as they
+throw at build time.
 
 ## Development
 
 ```sh
-npm test
+npm test        # 200+ tests: behavioral round-trips through V8, two
+                # differential fuzzers, per-instruction sweeps (~25k cases)
+npm run types   # regenerate index.d.ts from the veneer registry
 ```
+
+Emitting runs on Node ≥ 18; the test suite exercises wasm 3.0 features and
+needs Node ≥ 22. `emit()` is repeatable and byte-stable; `debug: true`
+captures creation stack traces for emit-time errors at zero steady-state
+cost.
 
 ## License
 

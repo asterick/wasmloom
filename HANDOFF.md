@@ -132,6 +132,11 @@ done. Remaining items are pinned:
   index.d.ts` (not part of `npm test` — no dev dependencies).
 - After every ratified design decision: update DESIGN.md (decisions table
   + relevant section) in the same commit as the implementation.
+- **README.md is always maintained** (Bryon's standing rule): any change to
+  the user-facing surface — features, flags, coverage, engine requirements —
+  updates README in the same commit. It went stale once; don't repeat that.
+- CI: .github/workflows/ci.yml — npm test on Node 22/24 plus a dts
+  staleness + tsc --strict typecheck job.
 - Tests are the oracle: every feature lands with behavioral round-trip
   tests through V8 (`WebAssembly.validate` + instantiate + assert results),
   eager-error tests, and — where machinery is touched — fuzzer/sweep

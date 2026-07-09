@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # the suite exercises wasm 3.0 features (multi-memory, tail calls),
+        # which need V8 ≥ 12 — Node 22 is the floor
+        node: [22.x, 24.x]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
+
+  types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      # declarations must be in sync (also asserted by npm test) and typecheck
+      - run: node scripts/generate-dts.js && git diff --exit-code index.d.ts
+      - run: npx -y -p typescript@5.5.4 tsc --noEmit --strict --target es2020 index.d.ts
