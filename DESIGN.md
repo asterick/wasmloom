@@ -34,6 +34,7 @@ toolchain; emits binary `.wasm` bytes directly.
 | SIMD masks | Comparisons produce dedicated mask types (`m8x16`/`m16x8`/`m32x4`/`m64x2`) — the SIMD analog of `bool`. `bitselect` requires a shape-matched mask; `any_true`/`all_true` (→ `bool`) and `bitmask` (→ `u32`) live on masks. Masks are not data and not conditions |
 | SIMD v128 ops | Lane-agnostic instructions (bitwise, `bitselect`, plain load/store) appear on every integer lane namespace and mask — no bare `v128` type in the public API. Every v128 view retypes into any other via zero-cost `cast` (the universal bridge; there is no wasm instruction to select). Floats keep the scalar discipline: no bitwise ops without casting to an integer view |
 | Diagnostics | `new Module({ debug: true })` captures creation stack traces for emit-time errors |
+| Threads | `shared: true` on memory limits (max required, eager). Atomics are the `atomic_` family on integer namespaces with the ordinary `(mem, addr, …)` shape — RMW returns the OLD value; sized forms zero-extend and are unsigned-only (sized-load precedent); natural alignment enforced (no `align` option). Futexes on the memory handle (`mem.wait32/wait64/notify`), `$.fence` on the context. Atomics stay valid on unshared memories |
 | GC | Struct/array types are entities with named ordered fields (object-literal order = field order), `imm()` immutability, `i8`/`i16` packed storage, declare-then-define recursion (auto rec groups), `{ extends }` subtyping with exact-prefix eager checks. Ops live on the handle (`T.new/get/set/…` by field NAME); `.ref.of` = trapping ref.cast, `.test` = bool probe; upcasts are promotions through the declared chain and the abstract layer (anyref/eqref/structref/arrayref/i31ref). ALL GC types share one rec group so same-shaped declarations stay nominally distinct (iso-recursive canonicalization would unify separate singletons). i31, segment-backed arrays, extern↔any included |
 | Exceptions | Tags are entities (`mod.tag([types])`, import/export/name). `$.throw`/`$.throwRef` are terminators on `$`; `$.try(body).catch(tag, cb).catchRef(tag, cb).catchAll(cb).catchAllRef(cb)` — payload as typed variable handles, first match wins, handlers run unprotected and fall to the join. **Try regions are control-flow islands**: gotos/labels never cross the boundary (eager error); variables, `$.return`, `$.throw` do. Bodies/handlers compile as nested sub-CFGs (relooped per region); exceptional edges feed liveness so slot sharing stays sound; implicit tail calls are suppressed under protection. `exnref` is a first-class variable type |
 | Name section | Emitted by default: debug names auto-derive (export name, else "module.name" for imports); `.name("str")` chains on every module-level handle and `mod.name()` names the module; `names: false` strips. Locals deliberately unnamed (slot sharing). `debug` stays byte-neutral — names are independent of it |
@@ -383,8 +384,8 @@ The following are recognized but **must not be implemented until the API is
 discussed and locked down** in a future planning session. Nothing in the core
 may assume a shape for these beyond what's noted here.
 
-- Already out of spec scope (no design needed yet): threads/atomics,
-  memory64, relaxed SIMD.
+- Already out of spec scope (no design needed yet): memory64,
+  relaxed SIMD.
 
 ## Pinned — might revisit later
 

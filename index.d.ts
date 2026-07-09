@@ -126,6 +126,8 @@ export interface Ctx<R extends readonly WasmType[] = WasmType[]> {
   try(body: (ctx: Ctx<R>) => void): TryChain<R>;
   drop(value: Expr): void;
   unreachable(): void;
+  /** atomic.fence — order memory effects without touching memory. */
+  fence(): void;
   if(cond: Into<"bool">, body: (ctx: Ctx<R>) => void): IfChain<R>;
   while(cond: Into<"bool">, body: (ctx: Ctx<R>) => void): void;
 }
@@ -242,7 +244,7 @@ export interface ArrayType<E extends FieldSpec = FieldSpec> {
   test(x: Expr<AnyHier>): Expr<"bool">;
 }
 
-export interface Limits { min: number; max?: number }
+export interface Limits { min: number; max?: number; shared?: boolean }
 
 export interface Memory {
   size(): Expr<"u32">;
@@ -250,6 +252,11 @@ export interface Memory {
   fill(dst: I32ish, value: I32ish, len: I32ish): void;
   copy(dst: I32ish, src: I32ish, len: I32ish, opts?: { from?: Memory }): void;
   init(seg: DataSegment, dst: I32ish, src: I32ish, len: I32ish): void;
+  /** Wake up to count waiters at addr; u32 woken count. */
+  notify(addr: I32ish, count: I32ish): Expr<"u32">;
+  /** Block while addr holds expected. u32: 0 woken, 1 mismatch, 2 timeout. */
+  wait32(addr: I32ish, expected: I32ish, timeoutNs: Into<"s64">): Expr<"u32">;
+  wait64(addr: I32ish, expected: Into<"s64">, timeoutNs: Into<"s64">): Expr<"u32">;
   import(module: string, name: string): this;
   export(name: string): this;
   /** Debug name for the name section (overrides export/import-derived). */
@@ -348,6 +355,17 @@ export interface Ns_s32 extends WasmType<"s32"> {
   load16(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"s32">;
   store8(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: MemOpts): void;
   store16(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: MemOpts): void;
+  atomic_load(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"s32">;
+  atomic_store(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: MemOpts): void;
+  atomic_store8(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: MemOpts): void;
+  atomic_store16(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: MemOpts): void;
+  atomic_add(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: { offset?: number }): Expr<"s32">;
+  atomic_sub(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: { offset?: number }): Expr<"s32">;
+  atomic_and(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: { offset?: number }): Expr<"s32">;
+  atomic_or(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: { offset?: number }): Expr<"s32">;
+  atomic_xor(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: { offset?: number }): Expr<"s32">;
+  atomic_xchg(mem: Memory, addr: I32ish, value: Into<"s32">, opts?: { offset?: number }): Expr<"s32">;
+  atomic_cmpxchg(mem: Memory, addr: I32ish, a: Into<"s32">, b: Into<"s32">, opts?: { offset?: number }): Expr<"s32">;
   wrap(a: Into<"s64">): Expr<"s32">;
   wrap(a: Into<"u64">): Expr<"s32">;
   trunc(a: Into<"f32">): Expr<"s32">;
@@ -388,6 +406,33 @@ export interface Ns_u32 extends WasmType<"u32"> {
   load16(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"u32">;
   store8(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: MemOpts): void;
   store16(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: MemOpts): void;
+  atomic_load(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"u32">;
+  atomic_store(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: MemOpts): void;
+  atomic_store8(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: MemOpts): void;
+  atomic_store16(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: MemOpts): void;
+  atomic_add(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_sub(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_and(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_or(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_xor(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_xchg(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_cmpxchg(mem: Memory, addr: I32ish, a: Into<"u32">, b: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_load8(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"u32">;
+  atomic_add8(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_sub8(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_and8(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_or8(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_xor8(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_xchg8(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_cmpxchg8(mem: Memory, addr: I32ish, a: Into<"u32">, b: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_load16(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"u32">;
+  atomic_add16(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_sub16(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_and16(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_or16(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_xor16(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_xchg16(mem: Memory, addr: I32ish, value: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
+  atomic_cmpxchg16(mem: Memory, addr: I32ish, a: Into<"u32">, b: Into<"u32">, opts?: { offset?: number }): Expr<"u32">;
   wrap(a: Into<"s64">): Expr<"u32">;
   wrap(a: Into<"u64">): Expr<"u32">;
   trunc(a: Into<"f32">): Expr<"u32">;
@@ -433,6 +478,18 @@ export interface Ns_s64 extends WasmType<"s64"> {
   store16(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: MemOpts): void;
   load32(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"s64">;
   store32(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: MemOpts): void;
+  atomic_load(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"s64">;
+  atomic_store(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: MemOpts): void;
+  atomic_store8(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: MemOpts): void;
+  atomic_store16(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: MemOpts): void;
+  atomic_store32(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: MemOpts): void;
+  atomic_add(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: { offset?: number }): Expr<"s64">;
+  atomic_sub(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: { offset?: number }): Expr<"s64">;
+  atomic_and(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: { offset?: number }): Expr<"s64">;
+  atomic_or(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: { offset?: number }): Expr<"s64">;
+  atomic_xor(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: { offset?: number }): Expr<"s64">;
+  atomic_xchg(mem: Memory, addr: I32ish, value: Into<"s64">, opts?: { offset?: number }): Expr<"s64">;
+  atomic_cmpxchg(mem: Memory, addr: I32ish, a: Into<"s64">, b: Into<"s64">, opts?: { offset?: number }): Expr<"s64">;
   extend(a: Into<"s32">): Expr<"s64">;
   trunc(a: Into<"f32">): Expr<"s64">;
   trunc(a: Into<"f64">): Expr<"s64">;
@@ -474,6 +531,42 @@ export interface Ns_u64 extends WasmType<"u64"> {
   store16(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: MemOpts): void;
   load32(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"u64">;
   store32(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: MemOpts): void;
+  atomic_load(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"u64">;
+  atomic_store(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: MemOpts): void;
+  atomic_store8(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: MemOpts): void;
+  atomic_store16(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: MemOpts): void;
+  atomic_store32(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: MemOpts): void;
+  atomic_add(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_sub(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_and(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_or(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_xor(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_xchg(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_cmpxchg(mem: Memory, addr: I32ish, a: Into<"u64">, b: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_load8(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"u64">;
+  atomic_add8(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_sub8(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_and8(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_or8(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_xor8(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_xchg8(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_cmpxchg8(mem: Memory, addr: I32ish, a: Into<"u64">, b: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_load16(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"u64">;
+  atomic_add16(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_sub16(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_and16(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_or16(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_xor16(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_xchg16(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_cmpxchg16(mem: Memory, addr: I32ish, a: Into<"u64">, b: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_load32(mem: Memory, addr: I32ish, opts?: MemOpts): Expr<"u64">;
+  atomic_add32(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_sub32(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_and32(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_or32(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_xor32(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_xchg32(mem: Memory, addr: I32ish, value: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
+  atomic_cmpxchg32(mem: Memory, addr: I32ish, a: Into<"u64">, b: Into<"u64">, opts?: { offset?: number }): Expr<"u64">;
   extend(a: Into<"u32">): Expr<"u64">;
   trunc(a: Into<"f32">): Expr<"u64">;
   trunc(a: Into<"f64">): Expr<"u64">;

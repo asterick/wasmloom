@@ -431,6 +431,50 @@ gc("i31", "get_s", 29, ["ref"], ["i32"]);
 gc("i31", "get_u", 30, ["ref"], ["i32"]);
 op("ref", "eq", 0xd3, ["ref", "ref"], ["i32"]);
 
+// --- threads/atomics (0xFE prefix; align must be natural) ---
+function at(ns, name, subop, params, results, extra) {
+  op(ns, name, [0xfe, subop], params, results, { atomic: true, ...extra });
+}
+at("memory", "atomic.notify", 0x00, ["i32", "i32"], ["i32"], { mem: "rmw", size: 4 });
+at("memory", "atomic.wait32", 0x01, ["i32", "i32", "i64"], ["i32"], { mem: "rmw2", size: 4 });
+at("memory", "atomic.wait64", 0x02, ["i32", "i64", "i64"], ["i32"], { mem: "rmw2", size: 8 });
+at("atomic", "fence", 0x03, [], [], { imm: "fence" });
+at("i32", "atomic.load", 0x10, ["i32"], ["i32"], { mem: "load", size: 4 });
+at("i64", "atomic.load", 0x11, ["i32"], ["i64"], { mem: "load", size: 8 });
+at("i32", "atomic.load8_u", 0x12, ["i32"], ["i32"], { mem: "load", size: 1 });
+at("i32", "atomic.load16_u", 0x13, ["i32"], ["i32"], { mem: "load", size: 2 });
+at("i64", "atomic.load8_u", 0x14, ["i32"], ["i64"], { mem: "load", size: 1 });
+at("i64", "atomic.load16_u", 0x15, ["i32"], ["i64"], { mem: "load", size: 2 });
+at("i64", "atomic.load32_u", 0x16, ["i32"], ["i64"], { mem: "load", size: 4 });
+at("i32", "atomic.store", 0x17, ["i32", "i32"], [], { mem: "store", size: 4 });
+at("i64", "atomic.store", 0x18, ["i32", "i64"], [], { mem: "store", size: 8 });
+at("i32", "atomic.store8", 0x19, ["i32", "i32"], [], { mem: "store", size: 1 });
+at("i32", "atomic.store16", 0x1a, ["i32", "i32"], [], { mem: "store", size: 2 });
+at("i64", "atomic.store8", 0x1b, ["i32", "i64"], [], { mem: "store", size: 1 });
+at("i64", "atomic.store16", 0x1c, ["i32", "i64"], [], { mem: "store", size: 2 });
+at("i64", "atomic.store32", 0x1d, ["i32", "i64"], [], { mem: "store", size: 4 });
+{
+  const RMW = ["add", "sub", "and", "or", "xor", "xchg"];
+  RMW.forEach((name, k) => {
+    const base = 0x1e + k * 7;
+    at("i32", `atomic.rmw.${name}`, base, ["i32", "i32"], ["i32"], { mem: "rmw", size: 4 });
+    at("i64", `atomic.rmw.${name}`, base + 1, ["i32", "i64"], ["i64"], { mem: "rmw", size: 8 });
+    at("i32", `atomic.rmw8.${name}_u`, base + 2, ["i32", "i32"], ["i32"], { mem: "rmw", size: 1 });
+    at("i32", `atomic.rmw16.${name}_u`, base + 3, ["i32", "i32"], ["i32"], { mem: "rmw", size: 2 });
+    at("i64", `atomic.rmw8.${name}_u`, base + 4, ["i32", "i64"], ["i64"], { mem: "rmw", size: 1 });
+    at("i64", `atomic.rmw16.${name}_u`, base + 5, ["i32", "i64"], ["i64"], { mem: "rmw", size: 2 });
+    at("i64", `atomic.rmw32.${name}_u`, base + 6, ["i32", "i64"], ["i64"], { mem: "rmw", size: 4 });
+  });
+  const base = 0x48;
+  at("i32", "atomic.rmw.cmpxchg", base, ["i32", "i32", "i32"], ["i32"], { mem: "rmw2", size: 4 });
+  at("i64", "atomic.rmw.cmpxchg", base + 1, ["i32", "i64", "i64"], ["i64"], { mem: "rmw2", size: 8 });
+  at("i32", "atomic.rmw8.cmpxchg_u", base + 2, ["i32", "i32", "i32"], ["i32"], { mem: "rmw2", size: 1 });
+  at("i32", "atomic.rmw16.cmpxchg_u", base + 3, ["i32", "i32", "i32"], ["i32"], { mem: "rmw2", size: 2 });
+  at("i64", "atomic.rmw8.cmpxchg_u", base + 4, ["i32", "i64", "i64"], ["i64"], { mem: "rmw2", size: 1 });
+  at("i64", "atomic.rmw16.cmpxchg_u", base + 5, ["i32", "i64", "i64"], ["i64"], { mem: "rmw2", size: 2 });
+  at("i64", "atomic.rmw32.cmpxchg_u", base + 6, ["i32", "i64", "i64"], ["i64"], { mem: "rmw2", size: 4 });
+}
+
 export const OPTABLE = table;
 
 /** Miscellaneous opcode bytes used directly by the encoder. */

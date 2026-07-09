@@ -56,6 +56,8 @@ if (instance.exports.square(9) !== 81) throw new Error("unexpected");
   chains, `exnref` rethrow.
 - [Garbage collection](gc.md) — struct/array heap types, subtyping and
   casts, `i31ref`, host interop.
+- [Threads and atomics](threads.md) — shared memories, the atomic family,
+  `wait`/`notify`, `fence`.
 
 **Tooling**
 
@@ -76,6 +78,7 @@ module* requires depends on the features it uses:
 | Typed func refs | wasm 3.0 | Node ≥ 22, Chrome ≥ 119 | [Typed function references](typed-funcref.md) — only if used |
 | Exceptions | wasm 3.0 | Node ≥ 24, Chrome ≥ 131 | [Exception handling](exceptions.md) — only if used |
 | GC | wasm 3.0 | Node ≥ 22, Chrome ≥ 119 | [Garbage collection](gc.md) — only if used |
+| Threads/atomics | phase 4 | any modern engine | [Threads and atomics](threads.md) — only if used |
 
 Every complete example in this manual is executed by the test suite
 (`test/docs-examples.test.js`) — if it's on these pages, it runs.

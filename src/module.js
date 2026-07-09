@@ -162,6 +162,21 @@ export class MemoryHandle {
     MEMORY_OPS.init(this, seg, dst, src, len);
   }
 
+  /** Wake up to `count` waiters at `addr` — a u32 expression (woken count). */
+  notify(addr, count) {
+    return MEMORY_OPS.notify(this, addr, count);
+  }
+
+  /** Block until notified at `addr`, if it holds `expected` (i32). u32 result: 0 woken, 1 mismatch, 2 timeout. */
+  wait32(addr, expected, timeoutNs) {
+    return MEMORY_OPS.wait(this, "wait32", addr, expected, timeoutNs);
+  }
+
+  /** 64-bit variant of wait32 (expected is s64). */
+  wait64(addr, expected, timeoutNs) {
+    return MEMORY_OPS.wait(this, "wait64", addr, expected, timeoutNs);
+  }
+
   import(moduleName, name) {
     if (this.importInfo) fail(".import(): memory is already imported");
     if (typeof moduleName !== "string" || typeof name !== "string") {
@@ -545,7 +560,9 @@ function resolveDataOffset(module, offset) {
 function checkLimits(limits, what) {
   const MAX_PAGES = 65536;
   if (limits === null || typeof limits !== "object") fail(`${what}: expected { min, max? }`);
-  const { min, max } = limits;
+  const { min, max, shared } = limits;
+  if (shared !== undefined && typeof shared !== "boolean") fail(`${what}: shared must be a boolean`);
+  if (shared && max === undefined) fail(`${what}: a shared memory requires a max`);
   if (!Number.isInteger(min) || min < 0 || min > MAX_PAGES) {
     fail(`${what}: min must be an integer page count in [0, ${MAX_PAGES}]`);
   }
@@ -554,7 +571,7 @@ function checkLimits(limits, what) {
       fail(`${what}: max must be an integer page count in [min, ${MAX_PAGES}]`);
     }
   }
-  return { min, max };
+  return shared ? { min, max, shared: true } : { min, max };
 }
 
 /** A WebAssembly module under construction. */

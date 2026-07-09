@@ -60,6 +60,10 @@ fixed-width **SIMD** — plus, from **wasm 3.0** (Node ≥ 22 to run):
   runtime signature check), tail-calling in return position. Tables of
   `sig.refNull` make checked-free vtables: `sig.call(vt.get(i), x)`.
   `sig.ref.of(x)` is the trapping nullable→non-null bridge.
+- **Threads and atomics** — `mod.memory({ …, shared: true })` shares a
+  `SharedArrayBuffer` across instances; the `atomic_` family (loads/stores,
+  old-value RMW, `cmpxchg`) lives on the integer namespaces, with
+  `mem.wait32`/`mem.notify` futexes and `$.fence`.
 - **Garbage collection** — `mod.struct({ x: f64, id: imm(s32) })` and
   `mod.array(i8)` declare heap types with named fields, packed storage,
   declared subtyping (`{ extends: Base }`), recursion via declare-then-define,

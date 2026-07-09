@@ -501,7 +501,8 @@ function needsNonNullAssert(vlocal) {
 }
 
 function writeLimits(s, limits) {
-  if (limits.max !== undefined) s.u8(0x01).u32(limits.min).u32(limits.max);
+  if (limits.shared) s.u8(0x03).u32(limits.min).u32(limits.max);
+  else if (limits.max !== undefined) s.u8(0x01).u32(limits.min).u32(limits.max);
   else s.u8(0x00).u32(limits.min);
 }
 
@@ -778,6 +779,7 @@ function writeItem(w, item, slotOf, btIndex) {
           case "gcType+data": w.u32(item.gcType.typeIndex).u32(item.segment.index); break;
           case "gcType2": w.u32(item.gcType.typeIndex).u32(item.srcGcType.typeIndex); break;
           case "heapType": w.s32(item.gcType.typeIndex); break;
+          case "fence": w.u8(0x00); break;
           default: break; // no immediates
         }
       }
