@@ -1,12 +1,16 @@
 import { successors } from "../cfg.js";
 
 /**
- * Backward liveness dataflow over virtual locals.
+ * Backward liveness dataflow over virtual locals (reachable blocks only).
  * Returns liveOut: Map<Block, Set<VLocal>>.
  */
-export function computeLiveness(blocks, code, cfg) {
-  const { reachable, preds } = cfg;
-  const live = blocks.filter((b) => reachable.has(b));
+export function computeLiveness(code, cfg) {
+  const { preds } = cfg;
+  // Iterate in RPO and walk it backwards below: postorder visits successors
+  // before predecessors, so backward flow converges in a couple of passes.
+  // (Creation order looks similar but interleaves merge blocks BEFORE their
+  // arms — under it, liveness crawls one conditional per pass: quadratic.)
+  const live = cfg.rpo;
 
   // Per-block gen (upward-exposed uses) and kill (defs).
   const gen = new Map();

@@ -249,7 +249,7 @@ function compileFunction(fn) {
   // irreducible flow (splitting/dispatch) preserves execution order, so
   // everything downstream runs on the rewritten graph.
   cfg = makeReducible(builder, cfg, code);
-  const liveOut = computeLiveness(builder.blocks, code, cfg);
+  const liveOut = computeLiveness(code, cfg);
   const { slotOf, localsDecl } = allocateSlots(builder, code, liveOut, cfg);
   const tree = reloop(builder, cfg, code);
   elideFreshZeroInits(tree, slotOf);
