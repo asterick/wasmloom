@@ -2,13 +2,16 @@
 // Regenerate with `npm run types`; test/dts.test.js fails when this is stale.
 
 export type TypeName =
-  "s32" | "u32" | "s64" | "u64" | "f32" | "f64" | "bool" | "funcref" | "externref" | "exnref" | "s8x16" | "u8x16" | "s16x8" | "u16x8" | "s32x4" | "u32x4" | "s64x2" | "u64x2" | "f32x4" | "f64x2" | "m8x16" | "m16x8" | "m32x4" | "m64x2";
+  "s32" | "u32" | "s64" | "u64" | "f32" | "f64" | "bool" | "funcref" | "externref" | "exnref" | "anyref" | "eqref" | "i31ref" | "structref" | "arrayref" | "s8x16" | "u8x16" | "s16x8" | "u16x8" | "s32x4" | "u32x4" | "s64x2" | "u64x2" | "f32x4" | "f64x2" | "m8x16" | "m16x8" | "m32x4" | "m64x2";
 
 /** Typed function reference brand: (ref $sig) / (ref null $sig). */
 export type RefBrand<
   P extends readonly WasmType[] = any, R extends readonly WasmType[] = any,
   N extends boolean = boolean> = { readonly __refParams: P; readonly __refResults: R; readonly __nullable: N };
-export type TypeTag = TypeName | RefBrand;
+/** GC struct/array reference brand; fields flow structurally. */
+export type GCBrand<F = any, N extends boolean = boolean> = { readonly __gcFields: F; readonly __gcNullable: N };
+export type TypeTag = TypeName | RefBrand | GCBrand;
+type AnyHier = "anyref" | "eqref" | "i31ref" | "structref" | "arrayref" | GCBrand;
 
 /** A single-value expression of builder-level type T. */
 export interface Expr<T extends TypeTag = TypeTag> {
@@ -27,6 +30,11 @@ type Accepts = {
   funcref: "funcref";
   externref: "externref";
   exnref: "exnref";
+  anyref: "anyref";
+  eqref: "eqref";
+  i31ref: "i31ref";
+  structref: "structref";
+  arrayref: "arrayref";
   s8x16: "s8x16";
   u8x16: "u8x16";
   s16x8: "s16x8";
@@ -46,9 +54,14 @@ type Accepts = {
 // nullable ref slots take the non-null form (structural: false <: boolean).
 export type Into<T extends TypeTag> =
   T extends "funcref" ? Expr<"funcref"> | Expr<RefBrand>
+  : T extends "anyref" ? Expr<AnyHier>
+  : T extends "eqref" ? Expr<"eqref" | "i31ref" | "structref" | "arrayref" | GCBrand>
+  : T extends "structref" | "arrayref" ? Expr<T | GCBrand>
   : T extends keyof Accepts ? Expr<Accepts[T] & TypeName>
   : T extends RefBrand<infer P, infer R, infer N>
     ? (N extends true ? Expr<RefBrand<P, R, boolean>> : Expr<RefBrand<P, R, false>>)
+  : T extends GCBrand<infer F, infer N>
+    ? (N extends true ? Expr<GCBrand<F, boolean>> : Expr<GCBrand<F, false>>)
   : never;
 type I32ish = Expr<"s32" | "u32" | "bool">; // sign-agnostic 32-bit positions
 
@@ -171,6 +184,64 @@ export interface TryChain<R extends readonly WasmType[]> {
   catchAllRef(cb: (exn: Var<"exnref">, ctx: Ctx<R>) => void): TryChain<R>;
 }
 
+/** Packed field storage (struct/array fields only). */
+export interface PackedType { readonly packed: 8 | 16; readonly name: string }
+export type FieldSpec = WasmType | PackedType | { __imm: WasmType | PackedType };
+/** Mark a struct/array field immutable. */
+export function imm<T extends WasmType | PackedType>(t: T): { __imm: T };
+export const i8: PackedType;
+export const i16: PackedType;
+
+type Unimm<F> = F extends { __imm: infer T } ? T : F;
+type DataKeys<F> = { [K in keyof F]: Unimm<F[K]> extends PackedType ? never : K }[keyof F];
+type PackedKeys<F> = { [K in keyof F]: Unimm<F[K]> extends PackedType ? K : never }[keyof F];
+type MutableKeys<F> = { [K in keyof F]: F[K] extends { __imm: any } ? never : K }[keyof F];
+type FieldTag<F, K extends keyof F> = NameOf<Unimm<F[K]>>;
+type GCRef<F, N extends boolean> = Expr<GCBrand<F, N>>;
+
+export interface GCRefType<F, N extends boolean> extends WasmType<GCBrand<F, N>> {
+  /** Checked, trapping downcast (ref.cast). */
+  of(x: Expr<AnyHier>): GCRef<F, N>;
+}
+export interface NullableGCRefType<F> extends GCRefType<F, true> {
+  null(): GCRef<F, true>;
+  is_null(x: GCRef<F, boolean>): Expr<"bool">;
+}
+
+export interface StructType<F extends Record<string, FieldSpec> = Record<string, FieldSpec>> {
+  readonly ref: GCRefType<F, false>;
+  readonly refNull: NullableGCRefType<F>;
+  fields(spec: F, opts?: { extends?: StructType<any> }): this;
+  new(...values: Array<Expr | Var | Global>): GCRef<F, false>;
+  newDefault(): GCRef<F, false>;
+  get<K extends DataKeys<F>>(x: GCRef<F, boolean>, field: K): Expr<FieldTag<F, K>>;
+  getS<K extends PackedKeys<F>>(x: GCRef<F, boolean>, field: K): Expr<"s32">;
+  getU<K extends PackedKeys<F>>(x: GCRef<F, boolean>, field: K): Expr<"u32">;
+  set<K extends MutableKeys<F> & DataKeys<F>>(x: GCRef<F, boolean>, field: K, value: Into<FieldTag<F, K>>): void;
+  set<K extends MutableKeys<F> & PackedKeys<F>>(x: GCRef<F, boolean>, field: K, value: I32ish): void;
+  /** Non-trapping type probe (ref.test). */
+  test(x: Expr<AnyHier>): Expr<"bool">;
+}
+
+export interface ArrayType<E extends FieldSpec = FieldSpec> {
+  readonly ref: GCRefType<{ element: E }, false>;
+  readonly refNull: NullableGCRefType<{ element: E }>;
+  element(spec: E): this;
+  new(len: I32ish, init?: Unimm<E> extends PackedType ? I32ish : Into<NameOf<Unimm<E>>>): GCRef<{ element: E }, false>;
+  newFixed(...values: Array<Expr | Var | Global>): GCRef<{ element: E }, false>;
+  newData(seg: DataSegment, offset: I32ish, len: I32ish): GCRef<{ element: E }, false>;
+  get(x: GCRef<{ element: E }, boolean>, index: I32ish): Expr<NameOf<Unimm<E>>>;
+  getS(x: GCRef<{ element: E }, boolean>, index: I32ish): Expr<"s32">;
+  getU(x: GCRef<{ element: E }, boolean>, index: I32ish): Expr<"u32">;
+  set(x: GCRef<{ element: E }, boolean>, index: I32ish, value: Unimm<E> extends PackedType ? I32ish : Into<NameOf<Unimm<E>>>): void;
+  len(x: GCRef<{ element: E }, boolean>): Expr<"u32">;
+  fill(x: GCRef<{ element: E }, boolean>, offset: I32ish, value: Unimm<E> extends PackedType ? I32ish : Into<NameOf<Unimm<E>>>, len: I32ish): void;
+  copy(dst: GCRef<{ element: E }, boolean>, dstOff: I32ish, src: GCRef<{ element: E }, boolean>, srcOff: I32ish, len: I32ish): void;
+  initData(x: GCRef<{ element: E }, boolean>, dstOff: I32ish, seg: DataSegment, srcOff: I32ish, len: I32ish): void;
+  /** Non-trapping type probe (ref.test). */
+  test(x: Expr<AnyHier>): Expr<"bool">;
+}
+
 export interface Limits { min: number; max?: number }
 
 export interface Memory {
@@ -227,6 +298,10 @@ export class Module {
   funcType<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): FuncType<P, R>;
   variable<W extends WasmType>(type: W, init?: GlobalInit<NameOf<W>>): Global<NameOf<W>>;
   tag<const P extends readonly WasmType[]>(params: P): Tag<P>;
+  /** GC struct type. Omit fields and call .fields() later for recursion. */
+  struct<F extends Record<string, FieldSpec>>(fields?: F, opts?: { extends?: StructType<any> }): StructType<F>;
+  /** GC array type. Omit the element and call .element() later. */
+  array<E extends FieldSpec>(element?: E): ArrayType<E>;
   memory(limits: Limits): Memory;
   table<E extends WasmType<"funcref"> | WasmType<"externref"> | NullableRefType<readonly WasmType[], readonly WasmType[]>>(
     elemType: E, limits: Limits): Table<NameOf<E>>;
@@ -492,12 +567,34 @@ export interface Ns_funcref extends WasmType<"funcref"> {
 }
 export interface Ns_externref extends WasmType<"externref"> {
   null(): Expr<"externref">;
+  of(x: Expr<AnyHier>): Expr<"externref">; // extern.convert_any
   is_null(a: Into<"externref">): Expr<"bool">;
   select(a: Into<"bool">, b: Into<"externref">, c: Into<"externref">): Expr<"externref">;
 }
 export interface Ns_exnref extends WasmType<"exnref"> {
   null(): Expr<"exnref">;
   is_null(a: Into<"exnref">): Expr<"bool">;
+}
+export interface Ns_anyref extends WasmType<"anyref"> {
+  null(): Expr<"anyref">;
+  of(x: Into<"externref">): Expr<"anyref">; // any.convert_extern
+}
+export interface Ns_eqref extends WasmType<"eqref"> {
+  null(): Expr<"eqref">;
+  eq(a: Into<"eqref">, b: Into<"eqref">): Expr<"bool">;
+}
+export interface Ns_i31ref extends WasmType<"i31ref"> {
+  null(): Expr<"i31ref">;
+  /** Boxes the LOW 31 bits. */
+  of(x: I32ish): Expr<"i31ref">;
+  getS(x: Into<"i31ref">): Expr<"s32">;
+  getU(x: Into<"i31ref">): Expr<"u32">;
+}
+export interface Ns_structref extends WasmType<"structref"> {
+  null(): Expr<"structref">;
+}
+export interface Ns_arrayref extends WasmType<"arrayref"> {
+  null(): Expr<"arrayref">;
 }
 export interface Ns_s8x16 extends WasmType<"s8x16"> {
   const(lanes: readonly number[]): Expr<"s8x16">;
@@ -944,6 +1041,11 @@ export const bool: Ns_bool;
 export const funcref: Ns_funcref;
 export const externref: Ns_externref;
 export const exnref: Ns_exnref;
+export const anyref: Ns_anyref;
+export const eqref: Ns_eqref;
+export const i31ref: Ns_i31ref;
+export const structref: Ns_structref;
+export const arrayref: Ns_arrayref;
 export const s8x16: Ns_s8x16;
 export const u8x16: Ns_u8x16;
 export const s16x8: Ns_s16x8;

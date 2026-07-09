@@ -398,6 +398,39 @@ simd("f64x2", "convert_low_i32x4_u", 255, ["v128"], ["v128"]);
 simd("f32x4", "demote_f64x2_zero", 94, ["v128"], ["v128"]);
 simd("f64x2", "promote_low_f32x4", 95, ["v128"], ["v128"]);
 
+// --- GC (0xFB prefix) ---
+function gc(ns, name, subop, params, results, extra) {
+  op(ns, name, [0xfb, subop], params, results, extra);
+}
+gc("struct", "new", 0, ["..."], ["ref"], { imm: "gcType" });
+gc("struct", "new_default", 1, [], ["ref"], { imm: "gcType" });
+gc("struct", "get", 2, ["ref"], ["t"], { imm: "gcType+field" });
+gc("struct", "get_s", 3, ["ref"], ["i32"], { imm: "gcType+field" });
+gc("struct", "get_u", 4, ["ref"], ["i32"], { imm: "gcType+field" });
+gc("struct", "set", 5, ["ref", "t"], [], { imm: "gcType+field" });
+gc("array", "new", 6, ["t", "i32"], ["ref"], { imm: "gcType" });
+gc("array", "new_default", 7, ["i32"], ["ref"], { imm: "gcType" });
+gc("array", "new_fixed", 8, ["..."], ["ref"], { imm: "gcType+len" });
+gc("array", "new_data", 9, ["i32", "i32"], ["ref"], { imm: "gcType+data" });
+gc("array", "get", 11, ["ref", "i32"], ["t"], { imm: "gcType" });
+gc("array", "get_s", 12, ["ref", "i32"], ["i32"], { imm: "gcType" });
+gc("array", "get_u", 13, ["ref", "i32"], ["i32"], { imm: "gcType" });
+gc("array", "set", 14, ["ref", "i32", "t"], [], { imm: "gcType" });
+gc("array", "len", 15, ["ref"], ["i32"]);
+gc("array", "fill", 16, ["ref", "i32", "t", "i32"], [], { imm: "gcType" });
+gc("array", "copy", 17, ["ref", "i32", "ref", "i32", "i32"], [], { imm: "gcType2" });
+gc("array", "init_data", 18, ["ref", "i32", "i32", "i32"], [], { imm: "gcType+data" });
+gc("ref", "test", 20, ["ref"], ["i32"], { imm: "heapType" });
+gc("ref", "test_null", 21, ["ref"], ["i32"], { imm: "heapType" });
+gc("ref", "cast", 22, ["ref"], ["ref"], { imm: "heapType" });
+gc("ref", "cast_null", 23, ["ref"], ["ref"], { imm: "heapType" });
+gc("any", "convert_extern", 26, ["ref"], ["ref"]);
+gc("extern", "convert_any", 27, ["ref"], ["ref"]);
+gc("ref", "i31", 28, ["i32"], ["ref"]);
+gc("i31", "get_s", 29, ["ref"], ["i32"]);
+gc("i31", "get_u", 30, ["ref"], ["i32"]);
+op("ref", "eq", 0xd3, ["ref", "ref"], ["i32"]);
+
 export const OPTABLE = table;
 
 /** Miscellaneous opcode bytes used directly by the encoder. */

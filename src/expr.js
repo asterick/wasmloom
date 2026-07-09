@@ -434,7 +434,7 @@ buildRefNamespace(exnref);
  * ref→funcref — are value-exact promotions; there is no downcast.
  */
 export function attachTypedRefs(sig, id) {
-  const { ref, refNull } = makeTypedRefs(sig, id);
+  const { ref, refNull } = makeTypedRefs(sig, `fn#${id}`);
   refNull.null = () => makeNode("const", { type: refNull, results: [refNull], value: null });
   refNull.is_null = (x) => {
     const what = `${refNull.name}.is_null`;
@@ -977,9 +977,36 @@ const PROMOTIONS = new Map([
 
 setCoercion((v, expected, builder) => {
   // Typed function reference upcasts are subtyping — value-exact, zero-cost.
-  if (expected === funcref && v.type.heapType) return retype(v, funcref);
+  if (expected === funcref && v.type.heapType?.handleKind === "functype") return retype(v, funcref);
   if (expected.heapType && !expected.nonNull && v.type.nullableTwin === expected) {
     return retype(v, expected);
+  }
+  // GC upcasts: concrete refs lift through declared supertypes and into the
+  // abstract hierarchy (structref/arrayref → eqref → anyref; i31ref too).
+  {
+    const vh = v.type.heapType;
+    const gcKind = vh && vh.handleKind !== "functype" ? vh.handleKind : null;
+    const isGCAbs = (t) => t.gcAbstract === true;
+    if (isGCAbs(expected)) {
+      const name = expected.name;
+      const ok =
+        (name === "anyref" && (gcKind || isGCAbs(v.type))) ||
+        (name === "eqref" && (gcKind || v.type.name === "i31ref" || v.type.name === "structref" || v.type.name === "arrayref")) ||
+        (name === "structref" && gcKind === "structtype") ||
+        (name === "arrayref" && gcKind === "arraytype");
+      if (ok && v.type !== expected && v.type.name !== "anyref") return retype(v, expected);
+    }
+    // concrete target: walk the declared supertype chain
+    const eh = expected.heapType;
+    if (eh && eh.handleKind === "structtype" && gcKind === "structtype") {
+      for (let t = vh.superType; t; t = t.superType) {
+        if (t === eh) {
+          // subtype ref lifts into supertype slots; non-null only into ref
+          if (!expected.nonNull || v.type.nonNull) return retype(v, expected);
+          break;
+        }
+      }
+    }
   }
   const spec = PROMOTIONS.get(expected)?.get(v.type);
   if (spec === "retype") return retype(v, expected);
@@ -1014,7 +1041,240 @@ export function promoteConst(node, target) {
   return target.const(v);
 }
 
+export { anyref, eqref, i31ref, structref, arrayref, i8, i16, imm } from "./types.js";
 export {
   s32, u32, s64, u64, f32, f64, bool, funcref, externref, exnref,
   s8x16, u8x16, s16x8, u16x8, s32x4, u32x4, s64x2, u64x2, f32x4, f64x2, m8x16, m16x8, m32x4, m64x2,
 };
+
+// --- GC: structs, arrays, casts, i31, extern↔any (wasm 3.0) -------------------
+// Struct/array type handles own their operations (attached below) and their
+// reference types, mirroring funcType handles. `.ref.of(x)` is the TRAPPING
+// downcast (ref.cast) and `.test(x)` the bool probe — upcasts, as everywhere,
+// are value-exact promotions.
+
+import { anyref, eqref, i31ref, structref, arrayref } from "./types.js";
+const gcE = (k) => entryOf(k);
+
+/** Is `t` a reference in the any-hierarchy (castable/testable)? */
+function inAnyHierarchy(t) {
+  return t.gcAbstract === true || (t.heapType !== undefined && t.heapType.handleKind !== "functype");
+}
+
+function resolveAnyRef(x, what) {
+  const v = resolveOperand(x, null, what);
+  if (!inAnyHierarchy(v.type)) {
+    fail(`${what}: expected a GC reference (struct/array/i31/any hierarchy), got ${v.type.name}`);
+  }
+  return v;
+}
+
+/** .ref / .refNull for a struct or array handle: cast-flavored bridges. */
+export function attachGCRefs(handle, label) {
+  const { ref, refNull } = makeTypedRefs(handle, label);
+  refNull.null = () => makeNode("const", { type: refNull, results: [refNull], value: null });
+  refNull.is_null = (x) => {
+    const what = `${refNull.name}.is_null`;
+    const v = resolveOperand(x, refNull, what);
+    return makeNode("op", { results: [bool], entry: gcE("ref.is_null"), operands: [v], display: what });
+  };
+  ref.of = (x) => {
+    const what = `${ref.name}.of`;
+    const v = resolveAnyRef(x, what);
+    return makeNode("op", { results: [ref], entry: gcE("ref.cast"), operands: [v], gcType: handle, display: what });
+  };
+  refNull.of = (x) => {
+    const what = `${refNull.name}.of`;
+    const v = resolveAnyRef(x, what);
+    return makeNode("op", { results: [refNull], entry: gcE("ref.cast_null"), operands: [v], gcType: handle, display: what });
+  };
+  handle.ref = ref;
+  handle.refNull = refNull;
+  handle.test = (x) => {
+    const what = `${label}.test`;
+    const v = resolveAnyRef(x, what);
+    return makeNode("op", { results: [bool], entry: gcE("ref.test_null"), operands: [v], gcType: handle, display: what });
+  };
+}
+
+const fieldValueType = (f) => (f.storage.packed ? null : f.storage);
+
+/** Operand for a field/element: packed storage takes any 32-bit integer. */
+function resolveStorage(x, storage, what) {
+  return storage.packed ? resolveInt32(x, what) : resolveOperand(x, storage, what);
+}
+
+function storageDefaultable(storage) {
+  if (storage.packed) return true;
+  return !storage.noDefault && !(storage.heapType && storage.nonNull) && storage.nonNull !== true;
+}
+
+export function attachStructOps(T) {
+  const label = T.ref.name.slice(5, -1); // "(ref struct#k)" → struct#k
+  const fieldOf = (name, what) => {
+    const f = T.fieldIndex.get(name);
+    if (f === undefined) fail(`${what}: no field "${name}" on ${label}`);
+    return f;
+  };
+  T.new = (...args) => {
+    const what = `${label}.new`;
+    const fs = T.fieldsSpec;
+    if (args.length !== fs.length) fail(`${what}: expected ${fs.length} value(s) (${fs.map((f) => f.name).join(", ")}), got ${args.length}`);
+    const operands = fs.map((f, i) => resolveStorage(args[i], f.storage, `${what} field "${f.name}"`));
+    return makeNode("op", { results: [T.ref], entry: gcE("struct.new"), operands, gcType: T, display: what });
+  };
+  T.newDefault = () => {
+    const what = `${label}.newDefault`;
+    const bad = T.fieldsSpec.find((f) => !storageDefaultable(f.storage));
+    if (bad) fail(`${what}: field "${bad.name}" (${bad.storage.name}) has no default value`);
+    return makeNode("op", { results: [T.ref], entry: gcE("struct.new_default"), operands: [], gcType: T, display: what });
+  };
+  const getWith = (name, entryKey, resultOf, packedOnly) => (x, fieldName) => {
+    const what = `${label}.${name}`;
+    const i = fieldOf(fieldName, what);
+    const f = T.fieldsSpec[i];
+    if (packedOnly && !f.storage.packed) fail(`${what}: field "${fieldName}" is not packed — use .get()`);
+    if (!packedOnly && f.storage.packed) fail(`${what}: field "${fieldName}" is packed (${f.storage.name}) — use .getS() or .getU()`);
+    const v = resolveOperand(x, null, what);
+    if (v.type !== T.ref && v.type !== T.refNull) fail(`${what}: expected a ${T.refNull.name}, got ${v.type.name}`);
+    return makeNode("op", { results: [resultOf(f)], entry: gcE(entryKey), operands: [v], gcType: T, fieldIndex: i, display: what });
+  };
+  T.get = getWith("get", "struct.get", (f) => f.storage, false);
+  T.getS = getWith("getS", "struct.get_s", () => s32, true);
+  T.getU = getWith("getU", "struct.get_u", () => u32, true);
+  T.set = (x, fieldName, value) => {
+    const what = `${label}.set`;
+    const i = fieldOf(fieldName, what);
+    const f = T.fieldsSpec[i];
+    if (!f.mutable) fail(`${what}: field "${fieldName}" is immutable`);
+    const v = resolveOperand(x, null, what);
+    if (v.type !== T.ref && v.type !== T.refNull) fail(`${what}: expected a ${T.refNull.name}, got ${v.type.name}`);
+    const val = resolveStorage(value, f.storage, `${what} value`);
+    makeNode("op", { results: [], entry: gcE("struct.set"), operands: [v, val], gcType: T, fieldIndex: i, display: what }, { anchor: true });
+  };
+}
+
+export function attachArrayOps(T) {
+  const label = T.ref.name.slice(5, -1);
+  const self = (x, what) => {
+    const v = resolveOperand(x, null, what);
+    if (v.type !== T.ref && v.type !== T.refNull) fail(`${what}: expected a ${T.refNull.name}, got ${v.type.name}`);
+    return v;
+  };
+  const elem = () => T.elemSpec;
+  T.new = (len, init) => {
+    const what = `${label}.new`;
+    const n = resolveInt32(len, `${what} length`);
+    if (init === undefined) {
+      if (!storageDefaultable(elem().storage)) fail(`${what}: ${elem().storage.name} elements have no default — pass an initial value`);
+      return makeNode("op", { results: [T.ref], entry: gcE("array.new_default"), operands: [n], gcType: T, display: what });
+    }
+    const v = resolveStorage(init, elem().storage, `${what} init`);
+    return makeNode("op", { results: [T.ref], entry: gcE("array.new"), operands: [v, n], gcType: T, display: what });
+  };
+  T.newFixed = (...vals) => {
+    const what = `${label}.newFixed`;
+    const operands = vals.map((x, i) => resolveStorage(x, elem().storage, `${what} element ${i}`));
+    return makeNode("op", { results: [T.ref], entry: gcE("array.new_fixed"), operands, gcType: T, count: vals.length, display: what });
+  };
+  T.newData = (seg, offset, len) => {
+    const what = `${label}.newData`;
+    if (seg?.handleKind !== "data") fail(`${what}: expected a data segment handle`);
+    if (seg.module !== T.module) fail(`${what}: data segment belongs to a different module`);
+    if (!elem().storage.packed && elem().storage.heapType) fail(`${what}: reference elements cannot come from data segments`);
+    const operands = [resolveInt32(offset, `${what} offset`), resolveInt32(len, `${what} length`)];
+    return makeNode("op", { results: [T.ref], entry: gcE("array.new_data"), operands, gcType: T, segment: seg, display: what });
+  };
+  const getWith = (name, entryKey, result, packedOnly) => (x, index) => {
+    const what = `${label}.${name}`;
+    if (packedOnly && !elem().storage.packed) fail(`${what}: elements are not packed — use .get()`);
+    if (!packedOnly && elem().storage.packed) fail(`${what}: elements are packed (${elem().storage.name}) — use .getS() or .getU()`);
+    const a = self(x, what);
+    const i = resolveInt32(index, `${what} index`);
+    return makeNode("op", { results: [result ?? elem().storage], entry: gcE(entryKey), operands: [a, i], gcType: T, display: what });
+  };
+  T.get = getWith("get", "array.get", null, false);
+  T.getS = getWith("getS", "array.get_s", s32, true);
+  T.getU = getWith("getU", "array.get_u", u32, true);
+  T.set = (x, index, value) => {
+    const what = `${label}.set`;
+    if (!elem().mutable) fail(`${what}: elements are immutable`);
+    const a = self(x, what);
+    const i = resolveInt32(index, `${what} index`);
+    const v = resolveStorage(value, elem().storage, `${what} value`);
+    makeNode("op", { results: [], entry: gcE("array.set"), operands: [a, i, v], gcType: T, display: what }, { anchor: true });
+  };
+  T.len = (x) => {
+    const what = `${label}.len`;
+    return makeNode("op", { results: [u32], entry: gcE("array.len"), operands: [self(x, what)], display: what });
+  };
+  T.fill = (x, offset, value, len) => {
+    const what = `${label}.fill`;
+    if (!elem().mutable) fail(`${what}: elements are immutable`);
+    const operands = [self(x, what), resolveInt32(offset, `${what} offset`), resolveStorage(value, elem().storage, `${what} value`), resolveInt32(len, `${what} length`)];
+    makeNode("op", { results: [], entry: gcE("array.fill"), operands, gcType: T, display: what }, { anchor: true });
+  };
+  T.copy = (dst, dstOff, src, srcOff, len) => {
+    const what = `${label}.copy`;
+    if (!elem().mutable) fail(`${what}: elements are immutable`);
+    const operands = [self(dst, what), resolveInt32(dstOff, `${what} destination offset`), self(src, `${what} source`), resolveInt32(srcOff, `${what} source offset`), resolveInt32(len, `${what} length`)];
+    makeNode("op", { results: [], entry: gcE("array.copy"), operands, gcType: T, srcGcType: T, display: what }, { anchor: true });
+  };
+  T.initData = (x, dstOff, seg, srcOff, len) => {
+    const what = `${label}.initData`;
+    if (!elem().mutable) fail(`${what}: elements are immutable`);
+    if (seg?.handleKind !== "data") fail(`${what}: expected a data segment handle`);
+    if (seg.module !== T.module) fail(`${what}: data segment belongs to a different module`);
+    const operands = [self(x, what), resolveInt32(dstOff, `${what} destination offset`), resolveInt32(srcOff, `${what} source offset`), resolveInt32(len, `${what} length`)];
+    makeNode("op", { results: [], entry: gcE("array.init_data"), operands, gcType: T, segment: seg, display: what }, { anchor: true });
+  };
+}
+
+// abstract namespaces: null/is_null on all five; eq on eqref; i31; converts
+for (const A of [anyref, eqref, i31ref, structref, arrayref]) {
+  A.null = () => makeNode("const", { type: A, results: [A], value: null });
+  A.is_null = (x) => {
+    const what = `${A.name}.is_null`;
+    const v = resolveOperand(x, A, what);
+    return makeNode("op", { results: [bool], entry: gcE("ref.is_null"), operands: [v], display: what });
+  };
+}
+
+/** Reference identity over the eq hierarchy (structs, arrays, i31). */
+eqref.eq = (a, b) => {
+  const what = "eqref.eq";
+  const ra = resolveOperand(a, eqref, what);
+  const rb = resolveOperand(b, eqref, what);
+  return makeNode("op", { results: [bool], entry: gcE("ref.eq"), operands: [ra, rb], display: what });
+};
+
+/** Unboxed 31-bit integer in the reference hierarchy. `of` keeps the LOW 31 bits. */
+i31ref.of = (x) => {
+  const v = resolveInt32(x, "i31ref.of");
+  return makeNode("op", { results: [i31ref], entry: gcE("ref.i31"), operands: [v], display: "i31ref.of" });
+};
+i31ref.getS = (x) => {
+  const v = resolveOperand(x, i31ref, "i31ref.getS");
+  return makeNode("op", { results: [s32], entry: gcE("i31.get_s"), operands: [v], display: "i31ref.getS" });
+};
+i31ref.getU = (x) => {
+  const v = resolveOperand(x, i31ref, "i31ref.getU");
+  return makeNode("op", { results: [u32], entry: gcE("i31.get_u"), operands: [v], display: "i31ref.getU" });
+};
+
+/** Host boundary: bring an externref into the any-hierarchy, and back. */
+anyref.of = (x) => {
+  const v = resolveOperand(x, externref, "anyref.of");
+  return makeNode("op", { results: [anyref], entry: gcE("any.convert_extern"), operands: [v], display: "anyref.of" });
+};
+externref.of = (x) => {
+  const v = resolveAnyRef(x, "externref.of");
+  return makeNode("op", { results: [externref], entry: gcE("extern.convert_any"), operands: [v], display: "externref.of" });
+};
+
+// sweep bookkeeping: GC ops are exercised through handle/typed harnesses
+for (const e of OPTABLE) {
+  if ((e.op[0] === 0xfb && e.op.length === 2) || (e.ns === "ref" && e.name === "eq")) {
+    VENEER_OPS.push({ ns: e.ns, name: e.name, params: [], results: [], entry: e, mem: "gc" });
+  }
+}
