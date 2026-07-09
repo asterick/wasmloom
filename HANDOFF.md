@@ -156,7 +156,7 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
 Empty. Every ratified feature is shipped; raw custom sections were DROPPED
 (see DESIGN.md "Dropped") — don't resurrect without a fresh decision from
 Bryon. Remaining spec landscape if ever needed: memory64, relaxed SIMD.
-The next milestone is the 0.1.0 release (version, tag, CHANGELOG, publish).
+0.1.0 released 2026-07-08 (tag v0.1.0, GitHub release, npm). Repo is PUBLIC. Keep CHANGELOG.md current with releases.
 
 ## Working conventions
 
