@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   Module, s32, u32, s64, f32, bool,
-  s8x16, u8x16, s16x8, s32x4, u32x4, s64x2, u64x2, f32x4, f64x2, m32x4, m8x16,
+  s8x16, u8x16, s16x8, s32x4, u32x4, s64x2, u64x2, f32x4, f64x2, m32x4,
 } from "../src/index.js";
 
 // Behavioral SIMD coverage: masks as first-class compare results, shape

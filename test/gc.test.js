@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  Module, s32, u32, f64, bool, funcref, externref,
-  anyref, eqref, i31ref, structref, arrayref, i8, i16, imm, WasmLoomError,
+  Module, s32, u32, f64, bool, externref,
+  anyref, eqref, i31ref, structref, i8, i16, imm, WasmLoomError,
 } from "../src/index.js";
 
 // GC (wasm 3.0): struct/array types with named fields, declared subtyping,

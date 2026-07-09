@@ -160,15 +160,16 @@ Bryon. Remaining spec landscape if ever needed: memory64, relaxed SIMD.
 
 ## Working conventions
 
-- Repo: github.com/asterick/wasmloom (private). Commit style: imperative
+- Repo: github.com/asterick/wasmloom (PUBLIC). Commit style: imperative
   summary + body, Claude co-author trailer.
 - **main is protected — never commit to it directly.** Two repo rulesets:
   "pr-and-review" (PR required, 1 code-owner review — CODEOWNERS:
   @asterick — no force pushes/deletion; repo ADMINS may merge a PR without
-  review via PR-mode bypass) and "ci-green" (test 22.x/24.x + types must
-  pass — no bypass, binds admins too). Direct pushes are blocked for
-  everyone including admins. Workflow: branch, push, `gh pr create`, hand
-  to Bryon — he can merge without approval; anyone else needs his review.
+  review via PR-mode bypass) and "ci-green" (test 22.x/24.x + types + lint
+  must pass — no bypass, binds admins too). Direct pushes are blocked for
+  everyone including admins. Workflow: branch, push, `gh pr create`, and
+  STOP — hand the PR to Bryon and NEVER merge it yourself (standing
+  instruction, 2026-07-09).
 - `index.d.ts` is GENERATED (`npm run types`, scripts/generate-dts.js) from
   `VENEER_OPS` + a hand-maintained skeleton; `test/dts.test.js` fails when
   stale. After touching the veneer, regenerate and commit both. Typecheck
@@ -184,8 +185,11 @@ Bryon. Remaining spec landscape if ever needed: memory64, relaxed SIMD.
   cross-links (pages + anchors) are checked — `npm test` fails on stale
   examples or broken links. docs/ is one page per wasm proposal plus core
   reference pages; GitHub Pages serves it from the /docs folder.
-- CI: .github/workflows/ci.yml — npm test on Node 22/24 plus a dts
-  staleness + tsc --strict typecheck job.
+- CI: .github/workflows/ci.yml — npm test on Node 22/24, a dts staleness +
+  tsc --strict typecheck job, and a lint job. Linting is ESLint 9 via
+  pinned npx (`npm run lint`; eslint.config.js is self-contained — the repo
+  stays zero-dependency, dev included). Unused `$` args are blessed (house
+  convention); `no-shadow` allows `$` for nested body callbacks.
 - Tests are the oracle: every feature lands with behavioral round-trip
   tests through V8 (`WebAssembly.validate` + instantiate + assert results),
   eager-error tests, and — where machinery is touched — fuzzer/sweep

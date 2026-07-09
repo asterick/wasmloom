@@ -30,8 +30,8 @@ function readNames(bytes) {
     const out = { module: null, maps: {} };
     while (i < end) {
       const sub = bytes[i++];
-      const size = u32();
-      const subEnd = i + size;
+      const subSize = u32();
+      const subEnd = i + subSize;
       if (sub === 0) { out.module = str(); i = subEnd; continue; }
       const m = new Map();
       const count = u32();
