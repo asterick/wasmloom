@@ -1,7 +1,7 @@
 # Extended constant expressions
 
 [← Manual index](index.md) · *WebAssembly proposal: extended constant
-expressions (wasm 3.0). Needs Node ≥ 20 / Chrome ≥ 114 — only when a module
+expressions (wasm 3.0). Needs Node ≥ 20 / Chrome ≥ 114 / Firefox ≥ 112 — only when a module
 actually uses constant arithmetic.*
 
 wasm restricts [global initializers](module.md#module-variables-wasm-globals)

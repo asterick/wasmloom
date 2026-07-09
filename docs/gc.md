@@ -1,7 +1,7 @@
 # Garbage collection
 
 [← Manual index](index.md) · *WebAssembly proposal: garbage collection
-(wasm 3.0). Needs Node ≥ 22 / Chrome ≥ 119 — only when a module declares GC
+(wasm 3.0). Needs Node ≥ 22 / Chrome ≥ 119 / Firefox ≥ 120 — only when a module declares GC
 types.*
 
 Engine-managed heap objects: **struct** types with named, ordered fields and

@@ -1,7 +1,7 @@
 # Typed function references
 
 [← Manual index](index.md) · *WebAssembly proposal: typed function references
-(wasm 3.0). Needs Node ≥ 22 / Chrome ≥ 119 — only when a module uses the
+(wasm 3.0). Needs Node ≥ 22 / Chrome ≥ 119 / Firefox ≥ 120 — only when a module uses the
 typed forms.*
 
 Where [`funcref`](tables.md) is "some function", a typed reference is "a
