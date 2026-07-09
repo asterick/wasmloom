@@ -8,7 +8,7 @@ A JavaScript library for generating WebAssembly binaries via expression
 builders — no external toolchain, `mod.emit()` → `Uint8Array`. The whole
 Wasm 2.0 surface is implemented, **including fixed-width SIMD**, plus
 multiple memories, extended constant expressions, tail calls, and typed
-function references from wasm 3.0. 218 tests, all passing (`npm test`,
+function references from wasm 3.0. 236 tests, all passing (`npm test`,
 Node ≥ 18 — the wasm 3.0 features need a newer engine, Node ≥ 22 in
 practice; zero dependencies).
 
@@ -115,7 +115,8 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
   `tables`, `signedness`, `bool`, `select`, `promotion`, `modes`,
   `errors` (~35 eager-error paths), `binary` (section-level asserts and
   peephole byte checks), `slots-stress`, `limits` (depth canaries), `leb`,
-  `dts` (generated declarations staleness).
+  `dts` (generated declarations staleness), `docs-examples`
+  (every manual example executes; cross-links checked).
 
 ## Queue (in priority order)
 
@@ -129,11 +130,13 @@ done. Remaining items are pinned:
 
 - Repo: github.com/asterick/wasmemit (private). Commit style: imperative
   summary + body, Claude co-author trailer.
-- **main is protected — never commit to it directly.** All work goes on a
-  branch and merges via PR; merging requires an approving review from a repo
-  administrator (CODEOWNERS: @asterick) AND green CI (test 22.x/24.x +
-  types). Rules apply to admins too. Branch, push, `gh pr create`, and hand
-  the PR to Bryon for approval.
+- **main is protected — never commit to it directly.** Two repo rulesets:
+  "pr-and-review" (PR required, 1 code-owner review — CODEOWNERS:
+  @asterick — no force pushes/deletion; repo ADMINS may merge a PR without
+  review via PR-mode bypass) and "ci-green" (test 22.x/24.x + types must
+  pass — no bypass, binds admins too). Direct pushes are blocked for
+  everyone including admins. Workflow: branch, push, `gh pr create`, hand
+  to Bryon — he can merge without approval; anyone else needs his review.
 - `index.d.ts` is GENERATED (`npm run types`, scripts/generate-dts.js) from
   `VENEER_OPS` + a hand-maintained skeleton; `test/dts.test.js` fails when
   stale. After touching the veneer, regenerate and commit both. Typecheck
