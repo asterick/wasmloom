@@ -60,6 +60,11 @@ fixed-width **SIMD** — plus, from **wasm 3.0** (Node ≥ 22 to run):
   runtime signature check), tail-calling in return position. Tables of
   `sig.refNull` make checked-free vtables: `sig.call(vt.get(i), x)`.
   `sig.ref.of(x)` is the trapping nullable→non-null bridge.
+- **Garbage collection** — `mod.struct({ x: f64, id: imm(s32) })` and
+  `mod.array(i8)` declare heap types with named fields, packed storage,
+  declared subtyping (`{ extends: Base }`), recursion via declare-then-define,
+  checked casts (`T.ref.of`/`T.test`), `i31ref`, `eqref.eq` identity, and
+  extern↔any host interop. Same-shaped types stay nominally distinct.
 - **Exception handling** — `mod.tag([types])` declares typed exceptions;
   `$.throw(tag, …)` raises, `$.try(body).catch(tag, (payload…, $) => {})`
   chains handlers (plus `catchAll` and `exnref`-carrying `Ref` variants for

@@ -171,6 +171,10 @@ export function linearize(builder, cfg) {
                 selectType: node.selectType,
                 lane: node.lane,
                 lanes: node.lanes,
+                gcType: node.gcType,
+                srcGcType: node.srcGcType,
+                fieldIndex: node.fieldIndex,
+                count: node.count,
               });
               break;
             case "call":

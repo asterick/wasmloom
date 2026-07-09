@@ -6,7 +6,8 @@ import { Variable } from "./variable.js";
 import { FunctionBuilder } from "./builder.js";
 import { encodeModule } from "./encode/encoder.js";
 import { MEMORY_OPS, TABLE_OPS, promoteConst, defaultInit, resolveInt32, forEachConstRef, attachTypedRefs } from "./expr.js";
-import { funcref, externref, isRef, isVec, typeKey } from "./types.js";
+import { funcref, externref, isRef, isVec, typeKey, checkValType as checkVT } from "./types.js";
+import { attachGCRefs, attachStructOps, attachArrayOps } from "./expr.js";
 
 function checkDebugName(s) {
   if (typeof s !== "string" || s.length === 0) fail(".name(): expected a non-empty string");
@@ -224,6 +225,81 @@ export class FuncTypeHandle {
     return this.results.map(
       (t, i) => new Variable("function", t, { builder: b, vlocal: node.spillTemps[i] }),
     );
+  }
+}
+
+function parseFieldSpec(spec, what) {
+  let mutable = true;
+  let t = spec;
+  if (t && t.__imm !== undefined) {
+    mutable = false;
+    t = t.__imm;
+  }
+  if (t && t.packed) return { storage: t, mutable };
+  checkVT(t, what);
+  return { storage: t, mutable };
+}
+
+/** A GC struct type: named, ordered fields; optional declared supertype. */
+export class StructTypeHandle {
+  constructor(module, id) {
+    this.handleKind = "structtype";
+    this.module = module;
+    this.fieldsSpec = null;
+    this.fieldIndex = null;
+    this.superType = null;
+    this.typeIndex = -1;
+    attachGCRefs(this, `struct#${id}`);
+  }
+
+  /** Attach fields (declare-then-define enables recursive types). */
+  fields(spec, opts = {}) {
+    if (this.fieldsSpec) fail(".fields(): this struct's fields are already defined");
+    if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
+      fail(".fields(): expected an object of { name: type } fields (order is field order)");
+    }
+    const names = Object.keys(spec);
+    const parsed = names.map((name) => ({ name, ...parseFieldSpec(spec[name], `struct field "${name}"`) }));
+    if (opts.extends !== undefined) {
+      const base = opts.extends;
+      if (base?.handleKind !== "structtype" || base.module !== this.module) {
+        fail(".fields(): `extends` must be a struct type from this module");
+      }
+      if (base === this) fail(".fields(): a struct cannot extend itself");
+      if (!base.fieldsSpec) fail(".fields(): define the supertype's fields before extending it");
+      if (parsed.length < base.fieldsSpec.length) {
+        fail(".fields(): a subtype must repeat all supertype fields first");
+      }
+      base.fieldsSpec.forEach((bf, i) => {
+        const cf = parsed[i];
+        if (cf.name !== bf.name || cf.storage !== bf.storage || cf.mutable !== bf.mutable) {
+          fail(`.fields(): field ${i} ("${cf.name}") must match the supertype's ("${bf.name}": ${bf.storage.name}${bf.mutable ? "" : ", immutable"})`);
+        }
+      });
+      this.superType = base;
+    }
+    this.fieldsSpec = parsed;
+    this.fieldIndex = new Map(parsed.map((f, i) => [f.name, i]));
+    attachStructOps(this);
+    return this;
+  }
+}
+
+/** A GC array type: one element storage type + mutability. */
+export class ArrayTypeHandle {
+  constructor(module, id) {
+    this.handleKind = "arraytype";
+    this.module = module;
+    this.elemSpec = null;
+    this.typeIndex = -1;
+    attachGCRefs(this, `array#${id}`);
+  }
+
+  element(spec) {
+    if (this.elemSpec) fail(".element(): this array's element type is already defined");
+    this.elemSpec = parseFieldSpec(spec, "array element");
+    attachArrayOps(this);
+    return this;
   }
 }
 
@@ -515,6 +591,7 @@ export class Module {
     this.elemSegments = [];
     this.refFunctions = new Set(); // ref.func'd — auto-declared at emit
     this.tags = [];
+    this.gcTypes = [];
     this._funcTypesByKey = new Map(); // signature interning (typed refs need one handle per shape)
     this.exports = [];
     this.exportNames = new Set();
@@ -607,6 +684,22 @@ export class Module {
     const resolved = resolveModuleInit(this, type, init);
     const handle = new Variable("module", type, { module: this, init: resolved, initExplicit });
     this.variables.push(handle);
+    return handle;
+  }
+
+  /** Declare a GC struct type. Omit fields and call .fields() later for recursion. */
+  struct(fields, opts) {
+    const handle = new StructTypeHandle(this, this.gcTypes.length);
+    this.gcTypes.push(handle);
+    if (fields !== undefined) handle.fields(fields, opts);
+    return handle;
+  }
+
+  /** Declare a GC array type. Omit the element and call .element() later. */
+  array(element) {
+    const handle = new ArrayTypeHandle(this, this.gcTypes.length);
+    this.gcTypes.push(handle);
+    if (element !== undefined) handle.element(element);
     return handle;
   }
 

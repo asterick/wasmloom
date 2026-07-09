@@ -113,25 +113,29 @@ export function encodeModule(module) {
   // surfaces the handler-payload block types that the type section interns.
   const bodies = definedFns.map((f) => (f.compiled ??= compileFunction(f)));
 
-  // Intern function signatures.
-  const typeIndices = new Map();
-  const typeList = [];
+  // ---- The unified type space: function signatures + GC struct/array types.
+  // Entries reference each other (fields, params, supertypes); iso-recursive
+  // wasm demands referenced-first ordering with cycles fused into rec groups,
+  // so we build the reference graph, take SCCs, and emit in completion order.
+  const funcEntries = new Map(); // typeKey → { kind: "func", params, results, index }
   const internType = (params, results) => {
     const key = typeKey(params, results);
-    if (!typeIndices.has(key)) {
-      typeIndices.set(key, typeList.length);
-      typeList.push({ params, results });
+    let e = funcEntries.get(key);
+    if (!e) {
+      e = { kind: "func", params, results, index: -1 };
+      funcEntries.set(key, e);
     }
-    return typeIndices.get(key);
+    return e;
   };
+  const pendingIndex = [];
   for (const f of [...importedFns, ...definedFns]) {
-    f.typeIndex = internType(f.params, f.results);
+    pendingIndex.push([f, internType(f.params, f.results)]);
   }
   for (const ft of module.funcTypes) {
-    ft.typeIndex = internType(ft.params, ft.results);
+    pendingIndex.push([ft, internType(ft.params, ft.results)]);
   }
   for (const t of [...importedTags, ...definedTags]) {
-    t.typeIndex = internType(t.params, []);
+    pendingIndex.push([t, internType(t.params, [])]);
   }
   // Multi-value catch payloads need [] -> payload block types.
   for (const body of bodies) {
@@ -143,17 +147,81 @@ export function encodeModule(module) {
       }
     });
   }
-  const blockTypeIndex = (types) => typeIndices.get(typeKey([], types));
+  for (const g of module.gcTypes) {
+    if (g.handleKind === "structtype" && !g.fieldsSpec) {
+      fail("a struct type was declared but never given .fields()");
+    }
+    if (g.handleKind === "arraytype" && !g.elemSpec) {
+      fail("an array type was declared but never given .element()");
+    }
+  }
+  const nodeOfHandle = (h) =>
+    h.handleKind === "functype" ? internType(h.params, h.results) : h;
+  const refTypesOf = (n) => {
+    const out = [];
+    const add = (t) => {
+      if (t && !t.packed && t.heapType) out.push(nodeOfHandle(t.heapType));
+    };
+    if (n.kind === "func") {
+      n.params.forEach(add);
+      n.results.forEach(add);
+    } else if (n.handleKind === "structtype") {
+      n.fieldsSpec.forEach((f) => add(f.storage));
+      if (n.superType) out.push(n.superType);
+    } else {
+      add(n.elemSpec.storage);
+    }
+    return out;
+  };
+  // force-intern signatures referenced from GC fields, then snapshot
+  for (const g of module.gcTypes) refTypesOf(g);
+  const typeNodes = [...funcEntries.values(), ...module.gcTypes];
+  // Iso-recursive wasm canonicalizes same-shaped singleton types together —
+  // two identical structs in separate rec groups would BE one type, making
+  // sibling casts truthy. Position inside a shared rec group keeps declared
+  // types nominally distinct, so all GC types (plus any signatures that
+  // transitively reference them) share one group; pure signatures stay bare
+  // singletons and keep their structural interop.
+  const touchesGC = new Set(module.gcTypes);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const n of typeNodes) {
+      if (touchesGC.has(n)) continue;
+      if (refTypesOf(n).some((r) => touchesGC.has(r))) {
+        touchesGC.add(n);
+        grew = true;
+      }
+    }
+  }
+  const bareFuncs = typeNodes.filter((n) => n.kind === "func" && !touchesGC.has(n));
+  const gcGroup = [
+    ...module.gcTypes, // declaration order: supertypes precede subtypes
+    ...typeNodes.filter((n) => n.kind === "func" && touchesGC.has(n)),
+  ];
+  const typeGroups = [...bareFuncs.map((n) => [n]), ...(gcGroup.length ? [gcGroup] : [])];
+  let nextTypeIndex = 0;
+  for (const group of typeGroups) {
+    for (const n of group) {
+      if (n.kind === "func") n.index = nextTypeIndex++;
+      else n.typeIndex = nextTypeIndex++;
+    }
+  }
+  for (const [o, e] of pendingIndex) o.typeIndex = e.index;
+  const blockTypeIndex = (types) => funcEntries.get(typeKey([], types)).index;
+  const extendedSet = new Set(module.gcTypes.map((g) => g.superType).filter(Boolean));
 
   const w = new ByteWriter();
   w.bytes([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
 
   w.section(SECTION.type, (s) => {
-    s.vec(typeList, (sw, t) => {
-      sw.u8(OPS.functype);
-      sw.vec(t.params, (x, p) => writeValType(x, p));
-      sw.vec(t.results, (x, r) => writeValType(x, r));
-    });
+    s.u32(typeGroups.length); // vec of rectypes (a bare type is a singleton)
+    for (const group of typeGroups) {
+      if (group.length > 1) {
+        s.u8(0x4e).u32(group.length);
+      }
+      for (const n of group) writeSubType(s, n, extendedSet);
+    }
   });
 
   const imports = [
@@ -388,6 +456,39 @@ function isZeroConst(item) {
   }
 }
 
+function writeStorageType(s, storage) {
+  if (storage.packed) s.u8(storage.packed === 8 ? 0x78 : 0x77);
+  else writeValType(s, storage);
+}
+
+/** One subtype entry: sub/sub-final wrapper when a hierarchy is declared. */
+function writeSubType(s, n, extendedSet) {
+  if (n.kind === "func") {
+    s.u8(OPS.functype);
+    s.vec(n.params, (x, p) => writeValType(x, p));
+    s.vec(n.results, (x, r) => writeValType(x, r));
+    return;
+  }
+  const isExtended = extendedSet.has(n);
+  const supers = n.superType ? [n.superType] : [];
+  if (isExtended || supers.length > 0) {
+    s.u8(isExtended ? 0x50 : 0x4f); // sub (open) vs sub final
+    s.u32(supers.length);
+    for (const sup of supers) s.u32(sup.typeIndex);
+  }
+  if (n.handleKind === "structtype") {
+    s.u8(0x5f);
+    s.vec(n.fieldsSpec, (sw, f) => {
+      writeStorageType(sw, f.storage);
+      sw.u8(f.mutable ? 1 : 0);
+    });
+  } else {
+    s.u8(0x5e);
+    writeStorageType(s, n.elemSpec.storage);
+    s.u8(n.elemSpec.mutable ? 1 : 0);
+  }
+}
+
 /** A value type: one byte, or ref/refnull code + interned type index. */
 function writeValType(s, t) {
   s.u8(t.code);
@@ -418,6 +519,11 @@ function writeConst(s, node) {
     case "funcref":
     case "externref":
     case "exnref":
+    case "anyref":
+    case "eqref":
+    case "i31ref":
+    case "structref":
+    case "arrayref":
       s.u8(OPS.ref_null).u8(node.type.code);
       break;
     default:
@@ -666,6 +772,12 @@ function writeItem(w, item, slotOf, btIndex) {
           case "elem": w.u32(item.segment.index); break;
           case "elem+table": w.u32(item.segment.index).u32(item.table.index); break;
           case "shuffle": w.bytes(item.lanes); break; // 16 lane indices
+          case "gcType": w.u32(item.gcType.typeIndex); break;
+          case "gcType+field": w.u32(item.gcType.typeIndex).u32(item.fieldIndex); break;
+          case "gcType+len": w.u32(item.gcType.typeIndex).u32(item.count); break;
+          case "gcType+data": w.u32(item.gcType.typeIndex).u32(item.segment.index); break;
+          case "gcType2": w.u32(item.gcType.typeIndex).u32(item.srcGcType.typeIndex); break;
+          case "heapType": w.s32(item.gcType.typeIndex); break;
           default: break; // no immediates
         }
       }

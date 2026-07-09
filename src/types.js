@@ -69,6 +69,21 @@ export const funcref = new ValType("funcref", 0x70, null);
 export const externref = new ValType("externref", 0x6f, null);
 export const exnref = new ValType("exnref", 0x69, null); // a caught exception (wasm 3.0 EH)
 
+// Abstract GC reference types (nullable): the any-hierarchy tops (wasm 3.0 GC).
+export const anyref = new ValType("anyref", 0x6e, null);
+export const eqref = new ValType("eqref", 0x6d, null);
+export const i31ref = new ValType("i31ref", 0x6c, null);
+export const structref = new ValType("structref", 0x6b, null);
+export const arrayref = new ValType("arrayref", 0x6a, null);
+for (const t of [anyref, eqref, i31ref, structref, arrayref]) t.gcAbstract = true;
+
+// Packed storage (struct/array fields only — never a value type).
+export const i8 = { packed: 8, name: "i8" };
+export const i16 = { packed: 16, name: "i16" };
+
+/** Mark a struct/array field immutable: mod.struct({ id: imm(s32) }). */
+export const imm = (t) => ({ __imm: t });
+
 /**
  * Typed function references (wasm 3.0): `(ref $sig)` / `(ref null $sig)`,
  * created per funcType handle. `heapType` points back at the handle — the
@@ -76,9 +91,9 @@ export const exnref = new ValType("exnref", 0x69, null); // a caught exception (
  * have no default value; their local slots are lowered to the nullable twin
  * with ref.as_non_null on read (see the encoder).
  */
-export function makeTypedRefs(sig, id) {
-  const ref = new ValType(`(ref fn#${id})`, 0x64, null);
-  const refNull = new ValType(`(ref null fn#${id})`, 0x63, null);
+export function makeTypedRefs(sig, label) {
+  const ref = new ValType(`(ref ${label})`, 0x64, null);
+  const refNull = new ValType(`(ref null ${label})`, 0x63, null);
   for (const t of [ref, refNull]) {
     t.heapType = sig;
     t.wasmType = t;
@@ -90,10 +105,10 @@ export function makeTypedRefs(sig, id) {
 }
 
 /** Storage types in canonical local-pool order (typed refs pool dynamically). */
-export const valtypes = [i32, i64, f32, f64, v128, funcref, externref, exnref];
+export const valtypes = [i32, i64, f32, f64, v128, funcref, externref, exnref, anyref, eqref, i31ref, structref, arrayref];
 
 export function isRef(t) {
-  return t === funcref || t === externref || t === exnref || t.heapType !== undefined;
+  return t === funcref || t === externref || t === exnref || t.gcAbstract === true || t.heapType !== undefined;
 }
 
 export function isVec(t) {
