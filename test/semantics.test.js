@@ -92,21 +92,21 @@ test("locals with disjoint live ranges share a slot", () => {
 function countLocals(bytes) {
   // Minimal scan: find the code section (id 10), first body, sum local counts.
   let i = 8;
-  const u32 = () => {
+  const readU32 = () => {
     let v = 0, shift = 0, b;
     do { b = bytes[i++]; v |= (b & 0x7f) << shift; shift += 7; } while (b & 0x80);
     return v >>> 0;
   };
   while (i < bytes.length) {
     const id = bytes[i++];
-    const size = u32();
+    const size = readU32();
     if (id !== 10) { i += size; continue; }
-    u32(); // body count
-    u32(); // body size
-    const groups = u32();
+    readU32(); // body count
+    readU32(); // body size
+    const groups = readU32();
     let total = 0;
     for (let g = 0; g < groups; g++) {
-      total += u32();
+      total += readU32();
       i++; // type byte
     }
     return total;

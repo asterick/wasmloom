@@ -1,6 +1,5 @@
 import { fail } from "../errors.js";
 import { s32 } from "../types.js";
-import { structuralSuccessors } from "../cfg.js";
 import { analyzeCfg } from "./dominators.js";
 
 /**

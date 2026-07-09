@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, s64, u64, f32, f64, bool, WasmLoomError } from "../src/index.js";
+import { Module, s32, u32, s64, u64, f32, f64, WasmLoomError } from "../src/index.js";
 
 // Safe value-exact promotion is DEFAULT behavior — the consuming op's
 // namespace explicitly names the target, and only lossless lifts exist, so

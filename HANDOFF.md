@@ -184,8 +184,11 @@ Bryon. Remaining spec landscape if ever needed: memory64, relaxed SIMD.
   cross-links (pages + anchors) are checked — `npm test` fails on stale
   examples or broken links. docs/ is one page per wasm proposal plus core
   reference pages; GitHub Pages serves it from the /docs folder.
-- CI: .github/workflows/ci.yml — npm test on Node 22/24 plus a dts
-  staleness + tsc --strict typecheck job.
+- CI: .github/workflows/ci.yml — npm test on Node 22/24, a dts staleness +
+  tsc --strict typecheck job, and a lint job. Linting is ESLint 9 via
+  pinned npx (`npm run lint`; eslint.config.js is self-contained — the repo
+  stays zero-dependency, dev included). Unused `$` args are blessed (house
+  convention); `no-shadow` allows `$` for nested body callbacks.
 - Tests are the oracle: every feature lands with behavioral round-trip
   tests through V8 (`WebAssembly.validate` + instantiate + assert results),
   eager-error tests, and — where machinery is touched — fuzzer/sweep

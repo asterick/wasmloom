@@ -13,7 +13,8 @@
   },
   "scripts": {
     "test": "node --test 'test/**/*.test.js'",
-    "types": "node scripts/generate-dts.js"
+    "types": "node scripts/generate-dts.js",
+    "lint": "npx -y eslint@9 ."
   },
   "keywords": [
     "webassembly",

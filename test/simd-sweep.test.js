@@ -456,7 +456,7 @@ test("every SIMD constructor selects and executes its spec instruction", async (
           assert.ok(ok, `${label} lane ${i}: expected ${want[i]}, got ${got[i]} (inputs ${combo.map(String).join(" | ")})`);
         }
       } else {
-        let want = expected;
+        const want = expected;
         let got = actual;
         const rt = v.results[0];
         if (rt && rt.name[0] === "u" && typeof got === "number") got = got >>> 0;
