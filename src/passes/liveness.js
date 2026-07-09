@@ -5,7 +5,6 @@ import { successors } from "../cfg.js";
  * Returns liveOut: Map<Block, Set<VLocal>>.
  */
 export function computeLiveness(code, cfg) {
-  const { preds } = cfg;
   // Iterate in RPO and walk it backwards below: postorder visits successors
   // before predecessors, so backward flow converges in a couple of passes.
   // (Creation order looks similar but interleaves merge blocks BEFORE their
@@ -53,6 +52,5 @@ export function computeLiveness(code, cfg) {
       }
     }
   }
-  void preds;
   return liveOut;
 }

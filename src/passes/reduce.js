@@ -76,7 +76,7 @@ export function makeReducible(builder, cfg, code, entry, succ) {
     }
 
     if (builder.blocks.length + region.size <= budget) {
-      splitRegion(builder, cfg, code, scc, region, succ);
+      splitRegion(builder, cfg, code, scc, region);
     } else {
       selector ??= builder.newVLocal(s32, "temp");
       dispatchLoop(builder, cfg, code, scc, entries, selector);
@@ -182,8 +182,7 @@ function stronglyConnected(order, inSubgraph, succ) {
  * originals then have no outside predecessors, so the header is the loop's
  * only entry. Copies share their original's instruction array.
  */
-function splitRegion(builder, cfg, code, scc, region, succ) {
-  void succ;
+function splitRegion(builder, cfg, code, scc, region) {
   const copies = new Map();
   for (const b of region) {
     const c = builder.newBlock();

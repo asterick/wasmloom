@@ -6,7 +6,7 @@ import { Variable } from "./variable.js";
 import { FunctionBuilder } from "./builder.js";
 import { encodeModule } from "./encode/encoder.js";
 import { MEMORY_OPS, TABLE_OPS, promoteConst, defaultInit, resolveInt32, forEachConstRef, attachTypedRefs } from "./expr.js";
-import { funcref, externref, isRef, isVec, typeKey, checkValType as checkVT } from "./types.js";
+import { funcref, externref, isRef, isVec, typeKey } from "./types.js";
 import { attachGCRefs, attachStructOps, attachArrayOps } from "./expr.js";
 
 function checkDebugName(s) {
@@ -251,7 +251,7 @@ function parseFieldSpec(spec, what) {
     t = t.__imm;
   }
   if (t && t.packed) return { storage: t, mutable };
-  checkVT(t, what);
+  checkValType(t, what);
   return { storage: t, mutable };
 }
 

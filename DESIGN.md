@@ -434,31 +434,30 @@ builder callbacks ──► CFG of basic blocks (typed instructions, virtual loc
 ```
 src/
   index.js          public exports
-  types.js          value types, function-type interning
-  module.js         Module + entity handles (function/memory/global/table/import)
-  builder.js        statement context ($), labels, if/while sugar
-  expr.js           expression nodes + generated instruction constructors
-  optable.js        data-driven opcode/instruction metadata
-  cfg.js            basic blocks, CFG construction
+  types.js          ValTypes: scalars, SIMD lanes/masks, refs (typed/GC/abstract), packed tokens
+  module.js         Module + entity handles: functions, funcTypes, tags, structs/arrays,
+                    memories, tables, globals, data/elem segments
+  builder.js        the $ statement context: labels, sugar, try/throw, regions
+  expr.js           expression veneer: generated constructors, promotion/coercion,
+                    consts, casts, GC/handle op implementations, VENEER_OPS registry
+  optable.js        the data-driven instruction table (scalar, SIMD, GC, atomics, EH)
+  node.js           expression nodes, operand resolution, the coercion hook
+  variable.js       variable handles (locals and globals)
+  cfg.js            basic blocks, labels, flow vs structural successor views
+  context.js        builder stack (which body is being built)
+  errors.js         WasmLoomError + fail()
   passes/
-    dominators.js
-    liveness.js
-    slots.js        local slot allocation
-    relooper.js     CFG → structured control flow
+    dominators.js   RPO + Cooper–Harvey–Kennedy idoms (parameterized successors)
+    linearize.js    multi-use temps, dominance checks, flat stack form, tail-call rewrite
+    reduce.js       irreducible → reducible (node splitting + dispatch fallback)
+    liveness.js     backward dataflow over virtual locals (postorder)
+    slots.js        slot coloring: locals share slots across disjoint live ranges
+    relooper.js     region-recursive "Beyond Relooper" reconstruction
   encode/
     leb.js          LEB128 / byte writer
-    encoder.js      section emission
-test/
+    encoder.js      unified type space (rec/sub), sections, name section, code emission
+scripts/
+  generate-dts.js   index.d.ts generator (from VENEER_OPS + hand-kept skeleton)
+docs/               the reference manual (GitHub Pages; examples are executed by tests)
+test/               behavioral suites, three differential fuzzers, two instruction sweeps
 ```
-
-## Implementation order
-
-1. `encode/` + `optable.js` — byte-level foundation, unit-testable.
-2. `types.js`, `module.js` — entities, interning, empty-module emit.
-3. Straight-line bodies: expressions, locals, `$.return` — first end-to-end
-   "emit and run an add function" test.
-4. Labels/goto + relooper (reducible cases), then `$.if`/`$.while` sugar.
-5. Liveness + slot allocation, auto-binding, dominance checks.
-6. Irreducible-CFG handling, `$.switch`, `$.unreachable`.
-7. Deferred items — each only after its API is designed and agreed
-   (see *Deferred* above).

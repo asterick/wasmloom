@@ -13,7 +13,10 @@ the type**, and the type picks the instruction.
 | `f32`, `f64` | `f32`, `f64` | floats |
 | `bool` | `i32` | first-class truth: values provably 0/1 |
 | `funcref`, `externref` | — | [references](tables.md); typed forms in [Typed function references](typed-funcref.md) |
+| `exnref` | — | a caught exception — [Exception handling](exceptions.md#rethrow-exnref) |
+| `anyref` ⊃ `eqref` ⊃ `structref`/`arrayref`/`i31ref` | — | the abstract [GC hierarchy](gc.md#subtyping-and-casts); concrete `T.ref`/`T.refNull` come from struct/array/signature handles |
 | `s8x16` … `m64x2` | `v128` | [SIMD lanes and masks](simd.md) |
+| `i8`, `i16` | — | packed *storage only* — [GC fields](gc.md), never a value type |
 
 Types double as **instruction namespaces**: `s32.add`, `u32.div`, `f64.sqrt`,
 `s64.load(mem, addr)`. Suffix-less names select the right wasm variant —

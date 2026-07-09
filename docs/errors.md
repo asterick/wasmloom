@@ -85,7 +85,10 @@ frames, so callers in tail position won't appear.)
 
 Traps are the engine's, not wasmloom's: division by zero, out-of-bounds
 access, `call_indirect` signature mismatches,
-[null function references](typed-funcref.md#promotion), `$.unreachable()`.
+[null function references](typed-funcref.md#promotion), failed
+[checked downcasts](gc.md#subtyping-and-casts) (`T.ref.of`),
+[misaligned atomics and `wait` on threads that forbid blocking](threads.md#wait-notify-fence),
+and `$.unreachable()`.
 They surface as `WebAssembly.RuntimeError` when the export is called. What
 wasmloom guarantees is that its *output validates* — the emitted bytes are
 checked against V8 across the entire test suite, including every example in
