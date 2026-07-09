@@ -9,7 +9,7 @@ toolchain; emits binary `.wasm` bytes directly.
 |---|---|
 | API style | Hybrid: expression objects for values, statement context (`$`) for effects/control flow |
 | Output | Binary `.wasm` bytes (`Uint8Array`) |
-| Spec target | Wasm 2.0 baseline: multi-value, bulk memory, reference types, sign-extension, nontrapping conversions, fixed-width SIMD |
+| Spec target | Wasm 2.0 baseline: multi-value, bulk memory, reference types, sign-extension, nontrapping conversions, fixed-width SIMD — plus multiple memories from wasm 3.0 |
 | Validation | Eager — type errors throw at the builder call that caused them |
 | Declarations | Handles: declare first, attach bodies later (forward decls, mutual recursion) |
 | Imports | Chained on the same declaration: `.import(module, name)` — exactly one of body/init or import |
@@ -229,10 +229,13 @@ of blocks — conditional values are written to locals in each arm, or use
 
 ### Memory
 
-- `mod.memory({ min, max? })` — limits in 64KiB pages, at most one memory per
-  module (imported or defined); `.import()`/`.export()` chain as usual.
-- Loads/stores take the memory handle explicitly (multi-memory bolts on
-  later). **Sized variants get their extension signedness from the type**:
+- `mod.memory({ min, max? })` — limits in 64KiB pages; a module may declare
+  any number of memories (wasm 3.0 multi-memory; imported memories index
+  first). `.import()`/`.export()` chain as usual.
+- Loads/stores take the memory handle explicitly, so multiple memories need
+  no new API — the handle routes every access, and memory 0 keeps the
+  classic (unflagged) encoding. **Sized variants get their extension
+  signedness from the type**:
   `u32.load8` zero-extends, `s32.load16` sign-extends, `s64.load32`/`u64.load32`
   likewise; stores (`store8/16/32`) truncate and are sign-agnostic (on both
   namespaces). `{offset, align}` immediates are optional — align defaults to
@@ -240,8 +243,9 @@ of blocks — conditional values are written to locals in each arm, or use
 - **Bulk operations live on the memory handle**: `mem.size()` and
   `mem.grow(delta)` are `u32` expressions (grow yields the old size, or
   2³²−1 on failure); `mem.fill(dst, byte, len)` and `mem.copy(dst, src, len)`
-  are statements. Addresses, counts, and byte values accept either 32-bit
-  signedness.
+  are statements. `mem.copy(dst, src, len, { from })` copies from another
+  memory (mirroring `tbl.copy`; the receiver is the destination). Addresses,
+  counts, and byte values accept either 32-bit signedness.
 - **Data segments are passive by default**: `mod.data(bytes)` takes a
   `Uint8Array`/`ArrayBuffer` (copied at declaration — later mutation of the
   source does not affect the module) and returns a handle. Chaining

@@ -212,7 +212,8 @@ export function encodeModule(module) {
     if (module.dataSegments.length === 0) return;
     s.vec(module.dataSegments, (sw, seg) => {
       if (seg.active) {
-        sw.u8(0x00);
+        if (seg.active.mem.index !== 0) sw.u8(0x02).u32(seg.active.mem.index);
+        else sw.u8(0x00);
         writeConstOffset(sw, seg.active.offset);
       } else {
         sw.u8(0x01);
@@ -434,13 +435,17 @@ function writeItem(w, item, slotOf) {
       }
       w.bytes(item.entry.op);
       if (item.entry.mem) {
-        w.u32(item.memarg.align).u32(item.memarg.offset);
+        // Nonzero memory: bit 6 of the align field flags an explicit index
+        // (memory 0 keeps the classic form, byte-identical to before).
+        if (item.mem.index !== 0) w.u32(item.memarg.align | 0x40).u32(item.mem.index);
+        else w.u32(item.memarg.align);
+        w.u32(item.memarg.offset);
       } else {
         switch (item.entry.imm) {
-          case "mem": w.u32(0); break; // single memory: index 0
-          case "mem+mem": w.u32(0).u32(0); break;
+          case "mem": w.u32(item.mem.index); break;
+          case "mem+mem": w.u32(item.mem.index).u32(item.srcMem.index); break;
           case "data": w.u32(item.segment.index); break;
-          case "data+mem": w.u32(item.segment.index).u32(0); break;
+          case "data+mem": w.u32(item.segment.index).u32(item.mem.index); break;
           case "table": w.u32(item.table.index); break;
           case "table+table": w.u32(item.table.index).u32(item.srcTable.index); break;
           case "elem": w.u32(item.segment.index); break;

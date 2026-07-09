@@ -166,10 +166,17 @@ test("else called twice", () => {
   });
 });
 
-test("second memory rejected", () => {
+test("mem.copy `from` must be a memory handle from this module", () => {
   const mod = new Module();
-  mod.memory({ min: 1 });
-  throws(() => mod.memory({ min: 1 }), /at most one memory/);
+  const a = mod.memory({ min: 1 });
+  const other = new Module().memory({ min: 1 });
+  mod.function([], []).body(($) => {
+    throws(
+      () => a.copy(s32.const(0), s32.const(0), s32.const(1), { from: other }),
+      /`from` must be a memory handle from this module/,
+    );
+    $.return();
+  });
 });
 
 test("start function signature checked", () => {

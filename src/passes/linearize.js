@@ -113,6 +113,8 @@ export function linearize(builder, cfg) {
                 k: "op",
                 entry: node.entry,
                 memarg: node.memarg,
+                mem: node.mem,
+                srcMem: node.srcMem,
                 segment: node.segment,
                 table: node.table,
                 srcTable: node.srcTable,

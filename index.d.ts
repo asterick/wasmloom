@@ -112,7 +112,7 @@ export interface Memory {
   size(): Expr<"u32">;
   grow(delta: I32ish): Expr<"u32">;
   fill(dst: I32ish, value: I32ish, len: I32ish): void;
-  copy(dst: I32ish, src: I32ish, len: I32ish): void;
+  copy(dst: I32ish, src: I32ish, len: I32ish, opts?: { from?: Memory }): void;
   init(seg: DataSegment, dst: I32ish, src: I32ish, len: I32ish): void;
   import(module: string, name: string): this;
   export(name: string): this;

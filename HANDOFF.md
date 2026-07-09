@@ -6,8 +6,10 @@ State snapshot for picking this project back up. Last updated: 2026-07-08.
 
 A JavaScript library for generating WebAssembly binaries via expression
 builders — no external toolchain, `mod.emit()` → `Uint8Array`. The whole
-Wasm 2.0 surface is implemented, **including fixed-width SIMD**. 188 tests,
-all passing (`npm test`, Node ≥ 18, zero dependencies).
+Wasm 2.0 surface is implemented, **including fixed-width SIMD**, plus
+multiple memories from wasm 3.0. 193 tests, all passing (`npm test`,
+Node ≥ 18 — the multi-memory tests need an engine with wasm 3.0
+multi-memory, Node ≥ 22 in practice; zero dependencies).
 
 **`DESIGN.md` is the contract.** Every API shape in it was explicitly
 ratified in planning discussions with Bryon. Do not implement new

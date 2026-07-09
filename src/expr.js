@@ -719,14 +719,22 @@ export const MEMORY_OPS = {
     ];
     makeNode("op", { results: [], entry: bulk("fill"), operands, mem, display: "mem.fill()" }, { anchor: true });
   },
-  copy(mem, dst, src, len) {
+  copy(mem, dst, src, len, opts = {}) {
     checkMemHandle(mem, "mem.copy()");
+    const from = opts.from ?? mem;
+    if (from.handleKind !== "memory" || from.module !== mem.module) {
+      fail("mem.copy(): `from` must be a memory handle from this module");
+    }
     const operands = [
       resolveInt32(dst, "mem.copy() destination"),
       resolveInt32(src, "mem.copy() source"),
       resolveInt32(len, "mem.copy() length"),
     ];
-    makeNode("op", { results: [], entry: bulk("copy"), operands, mem, display: "mem.copy()" }, { anchor: true });
+    makeNode(
+      "op",
+      { results: [], entry: bulk("copy"), operands, mem, srcMem: from, display: "mem.copy()" },
+      { anchor: true },
+    );
   },
   init(mem, seg, dst, src, len) {
     const b = checkMemHandle(mem, "mem.init()");

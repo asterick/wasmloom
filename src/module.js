@@ -132,9 +132,9 @@ export class MemoryHandle {
     MEMORY_OPS.fill(this, dst, value, len);
   }
 
-  /** Copy `len` bytes from `src` to `dst` within this memory. Statement. */
-  copy(dst, src, len) {
-    MEMORY_OPS.copy(this, dst, src, len);
+  /** Copy `len` bytes from `src` to `dst`. `opts.from` names another source memory. Statement. */
+  copy(dst, src, len, opts) {
+    MEMORY_OPS.copy(this, dst, src, len, opts);
   }
 
   /** Copy `len` bytes from a passive data segment (at `src`) to `dst`. Statement. */
@@ -462,9 +462,8 @@ export class Module {
     return handle;
   }
 
-  /** Declare a linear memory. Limits in 64KiB pages. At most one per module. */
+  /** Declare a linear memory. Limits in 64KiB pages. */
   memory(limits) {
-    if (this.memories.length > 0) fail("mod.memory: a module may declare at most one memory");
     const handle = new MemoryHandle(this, checkLimits(limits, "mod.memory"));
     this.memories.push(handle);
     return handle;

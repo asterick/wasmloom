@@ -171,7 +171,7 @@ export function generateDts() {
   push("  size(): Expr<\"u32\">;");
   push("  grow(delta: I32ish): Expr<\"u32\">;");
   push("  fill(dst: I32ish, value: I32ish, len: I32ish): void;");
-  push("  copy(dst: I32ish, src: I32ish, len: I32ish): void;");
+  push("  copy(dst: I32ish, src: I32ish, len: I32ish, opts?: { from?: Memory }): void;");
   push("  init(seg: DataSegment, dst: I32ish, src: I32ish, len: I32ish): void;");
   push("  import(module: string, name: string): this;");
   push("  export(name: string): this;");

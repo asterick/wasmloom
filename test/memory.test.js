@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, s64, u64, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, s64, u64, s64x2, WasmEmitError } from "../src/index.js";
 
 const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmEmitError && re.test(e.message));
 
@@ -230,4 +230,90 @@ test("an active segment that does not fit fails at instantiation", async () => {
   const bytes = mod.emit();
   assert.ok(WebAssembly.validate(bytes), "still a valid module — failure is at instantiation");
   await assert.rejects(WebAssembly.instantiate(bytes), WebAssembly.RuntimeError);
+});
+
+test("multiple memories: loads/stores route to the right memory", async () => {
+  const mod = new Module();
+  const a = mod.memory({ min: 1 }).export("a");
+  const b = mod.memory({ min: 1 }).export("b");
+  mod.function([s32], []).export("run").body((x, $) => {
+    s32.store(a, s32.const(0), x);
+    s32.store(b, s32.const(0), s32.mul(x, s32.const(2)));
+    s32.store(b, s32.const(4), s32.load(a, s32.const(0), { offset: 0 }));
+    $.return();
+  });
+  const { exports } = await instantiate(mod);
+  exports.run(21);
+  assert.equal(new Int32Array(exports.a.buffer)[0], 21);
+  assert.deepEqual([...new Int32Array(exports.b.buffer).slice(0, 2)], [42, 21]);
+});
+
+test("multiple memories: imported memory takes index 0, defined follows", async () => {
+  const mod = new Module();
+  const imp = mod.memory({ min: 1 }).import("env", "m");
+  const own = mod.memory({ min: 1 }).export("own");
+  mod.function([], [u32, u32]).export("sizes").body(($) => {
+    $.drop(own.grow(s32.const(2)));
+    $.return(imp.size(), own.size());
+  });
+  const imported = new WebAssembly.Memory({ initial: 3 });
+  const { exports } = await instantiate(mod, { env: { m: imported } });
+  assert.deepEqual(exports.sizes(), [3, 3]); // own grew 1 → 3
+});
+
+test("multiple memories: cross-memory copy via opts.from, both directions", async () => {
+  const mod = new Module();
+  const a = mod.memory({ min: 1 }).export("a");
+  const b = mod.memory({ min: 1 }).export("b");
+  mod.function([], []).export("run").body(($) => {
+    a.fill(s32.const(0), s32.const(7), s32.const(4));
+    b.copy(s32.const(8), s32.const(0), s32.const(4), { from: a }); // a → b
+    b.fill(s32.const(0), s32.const(9), s32.const(2));
+    a.copy(s32.const(16), s32.const(0), s32.const(2), { from: b }); // b → a
+    a.copy(s32.const(20), s32.const(16), s32.const(2)); // within a (default)
+    $.return();
+  });
+  const { exports } = await instantiate(mod);
+  exports.run();
+  const bytesA = new Uint8Array(exports.a.buffer);
+  const bytesB = new Uint8Array(exports.b.buffer);
+  assert.deepEqual([...bytesB.slice(8, 12)], [7, 7, 7, 7]);
+  assert.deepEqual([...bytesA.slice(16, 22)], [9, 9, 0, 0, 9, 9]);
+});
+
+test("multiple memories: active and passive segments target the right memory", async () => {
+  const mod = new Module();
+  mod.memory({ min: 1 }); // memory 0, untouched
+  const b = mod.memory({ min: 1 }).export("b");
+  mod.data(new Uint8Array([1, 2, 3])).at(b, 4); // active into memory 1
+  const seg = mod.data(new Uint8Array([9, 8, 7, 6]));
+  mod.function([], []).export("run").body(($) => {
+    b.init(seg, s32.const(16), s32.const(1), s32.const(3));
+    $.return();
+  });
+  const { exports } = await instantiate(mod);
+  exports.run();
+  const bytes = new Uint8Array(exports.b.buffer);
+  assert.deepEqual([...bytes.slice(4, 7)], [1, 2, 3]);
+  assert.deepEqual([...bytes.slice(16, 19)], [8, 7, 6]);
+});
+
+test("multiple memories: v128 and sized accesses use the flagged memarg", async () => {
+  const mod = new Module();
+  mod.memory({ min: 1 });
+  const b = mod.memory({ min: 1 }).export("b");
+  mod.function([s64], []).export("run").body((x, $) => {
+    s64.store(b, s32.const(0), x);
+    s64.store(b, s32.const(8), s64.load32(b, s32.const(0), { align: 2 }));
+    u64.store(b, s32.const(16), u64.load8(b, s32.const(3)));
+    s64x2.store(b, s32.const(32), s64x2.add(s64x2.load(b, s32.const(0)), s64x2.splat(s64.const(1))));
+    $.return();
+  });
+  const { exports } = await instantiate(mod);
+  exports.run(-2n);
+  const dv = new DataView(exports.b.buffer);
+  assert.equal(dv.getBigInt64(8, true), -2n); // low 32 bits sign-extended
+  assert.equal(dv.getBigUint64(16, true), 0xffn);
+  assert.equal(dv.getBigInt64(32, true), -1n); // v128 lane 0: -2 + 1
+  assert.equal(dv.getBigInt64(40, true), -1n); // lane 1: -2 + 1
 });
