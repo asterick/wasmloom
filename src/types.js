@@ -67,6 +67,7 @@ export const m64x2 = vec("m64x2", 2);
 // Reference types (their own storage; null is the zero value).
 export const funcref = new ValType("funcref", 0x70, null);
 export const externref = new ValType("externref", 0x6f, null);
+export const exnref = new ValType("exnref", 0x69, null); // a caught exception (wasm 3.0 EH)
 
 /**
  * Typed function references (wasm 3.0): `(ref $sig)` / `(ref null $sig)`,
@@ -89,10 +90,10 @@ export function makeTypedRefs(sig, id) {
 }
 
 /** Storage types in canonical local-pool order (typed refs pool dynamically). */
-export const valtypes = [i32, i64, f32, f64, v128, funcref, externref];
+export const valtypes = [i32, i64, f32, f64, v128, funcref, externref, exnref];
 
 export function isRef(t) {
-  return t === funcref || t === externref || t.heapType !== undefined;
+  return t === funcref || t === externref || t === exnref || t.heapType !== undefined;
 }
 
 export function isVec(t) {

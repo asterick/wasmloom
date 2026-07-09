@@ -4,14 +4,14 @@ import { successors } from "../cfg.js";
  * Reachability, reverse postorder, predecessors, and immediate dominators
  * (Cooper–Harvey–Kennedy) for a function's CFG.
  */
-export function analyzeCfg(entry) {
+export function analyzeCfg(entry, succ = successors) {
   // Postorder DFS (iterative), then reverse.
   const seen = new Set([entry]);
   const post = [];
   const stack = [{ block: entry, i: 0 }];
   while (stack.length) {
     const frame = stack[stack.length - 1];
-    const succs = successors(frame.block);
+    const succs = succ(frame.block);
     if (frame.i < succs.length) {
       const s = succs[frame.i++];
       if (!seen.has(s)) {
@@ -28,7 +28,7 @@ export function analyzeCfg(entry) {
 
   const preds = new Map(rpo.map((b) => [b, []]));
   for (const b of rpo) {
-    for (const s of successors(b)) {
+    for (const s of succ(b)) {
       if (rpoIndex.has(s)) preds.get(s).push(b);
     }
   }

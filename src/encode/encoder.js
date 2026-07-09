@@ -8,6 +8,7 @@ import { makeReducible } from "../passes/reduce.js";
 import { computeLiveness } from "../passes/liveness.js";
 import { allocateSlots } from "../passes/slots.js";
 import { reloop } from "../passes/relooper.js";
+import { structuralSuccessors } from "../cfg.js";
 import { forEachConstRef } from "../expr.js";
 
 const SECTION = {
@@ -23,9 +24,10 @@ const SECTION = {
   code: 10,
   data: 11,
   dataCount: 12,
+  tag: 13,
 };
 
-const EXPORT_KIND = { func: 0, table: 1, memory: 2, global: 3 };
+const EXPORT_KIND = { func: 0, table: 1, memory: 2, global: 3, tag: 4 };
 
 /** Assemble the whole module into binary wasm bytes. */
 export function encodeModule(module) {
@@ -46,6 +48,10 @@ export function encodeModule(module) {
   const importedTables = module.tables.filter((t) => t.importInfo);
   const definedTables = module.tables.filter((t) => !t.importInfo);
   [...importedTables, ...definedTables].forEach((t, i) => (t.index = i));
+
+  const importedTags = module.tags.filter((t) => t.importInfo);
+  const definedTags = module.tags.filter((t) => !t.importInfo);
+  [...importedTags, ...definedTags].forEach((t, i) => (t.index = i));
 
   // Element segments: user segments in declaration order, then (if any
   // function was ref.func'd) one hidden declarative segment satisfying the
@@ -101,6 +107,12 @@ export function encodeModule(module) {
     }
   }
 
+  // Compile all defined bodies before writing anything. Compilation mutates
+  // per-node state (temp assignment), so it runs once per function and is
+  // cached — emit() must be repeatable and byte-stable. Compiling first also
+  // surfaces the handler-payload block types that the type section interns.
+  const bodies = definedFns.map((f) => (f.compiled ??= compileFunction(f)));
+
   // Intern function signatures.
   const typeIndices = new Map();
   const typeList = [];
@@ -118,11 +130,20 @@ export function encodeModule(module) {
   for (const ft of module.funcTypes) {
     ft.typeIndex = internType(ft.params, ft.results);
   }
-
-  // Compile all defined bodies before writing anything. Compilation mutates
-  // per-node state (temp assignment), so it runs once per function and is
-  // cached — emit() must be repeatable and byte-stable.
-  const bodies = definedFns.map((f) => (f.compiled ??= compileFunction(f)));
+  for (const t of [...importedTags, ...definedTags]) {
+    t.typeIndex = internType(t.params, []);
+  }
+  // Multi-value catch payloads need [] -> payload block types.
+  for (const body of bodies) {
+    forEachTryItem(body.tree, (item) => {
+      for (const h of item.handlers) {
+        if (h.payloadTypes.length > 1 || (h.payloadTypes.length === 1 && h.payloadTypes[0].heapType)) {
+          internType([], h.payloadTypes);
+        }
+      }
+    });
+  }
+  const blockTypeIndex = (types) => typeIndices.get(typeKey([], types));
 
   const w = new ByteWriter();
   w.bytes([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
@@ -144,6 +165,10 @@ export function encodeModule(module) {
     ...importedMems.map((m) => ({
       info: m.importInfo,
       write: (s) => { s.u8(0x02); writeLimits(s, m.limits); },
+    })),
+    ...importedTags.map((t) => ({
+      info: t.importInfo,
+      write: (s) => s.u8(0x04).u8(0x00).u32(t.typeIndex),
     })),
     ...importedGlobals.map((g) => ({
       info: g.importInfo,
@@ -175,6 +200,12 @@ export function encodeModule(module) {
   w.section(SECTION.memory, (s) => {
     if (definedMems.length === 0) return;
     s.vec(definedMems, (sw, m) => writeLimits(sw, m.limits));
+  });
+
+  // The tag section sits between memory and global despite its id (13).
+  w.section(SECTION.tag, (s) => {
+    if (definedTags.length === 0) return;
+    s.vec(definedTags, (sw, t) => sw.u8(0x00).u32(t.typeIndex));
   });
 
   w.section(SECTION.global, (s) => {
@@ -218,7 +249,7 @@ export function encodeModule(module) {
     if (bodies.length === 0) return;
     s.vec(bodies, (sw, body) => {
       const bw = new ByteWriter();
-      writeBody(bw, body);
+      writeBody(bw, body, blockTypeIndex);
       sw.u32(bw.len).bytes(bw.toBytes());
     });
   });
@@ -268,6 +299,7 @@ function debugNameOf(h) {
 function writeNameSection(w, module, { fns, tables, mems, globals, elems }) {
   const spaces = [
     [1, fns], [5, tables], [6, mems], [7, globals], [8, elems], [9, module.dataSegments],
+    [11, module.tags],
   ];
   const anyNamed = module.moduleName || spaces.some(([, list]) => list.some((h) => debugNameOf(h) !== null));
   if (!anyNamed) return;
@@ -285,17 +317,32 @@ function writeNameSection(w, module, { fns, tables, mems, globals, elems }) {
 /** Run the full pipeline for one defined function. */
 function compileFunction(fn) {
   const builder = fn.builderData;
-  let cfg = analyzeCfg(builder.entry);
+  let cfg = analyzeCfg(builder.entry); // flow view: exceptional edges included
   const code = linearize(builder, cfg);
-  // Multi-use dominance was checked against the CFG as written; lowering
-  // irreducible flow (splitting/dispatch) preserves execution order, so
-  // everything downstream runs on the rewritten graph.
-  cfg = makeReducible(builder, cfg, code);
+  // Irreducibility is region-local (gotos cannot cross try boundaries), so
+  // reduction runs per region on the structural graphs.
+  for (const { entry } of regionEntries(cfg)) {
+    const succ = (b) => structuralSuccessors(b).filter((x) => x.region === entry.region);
+    makeReducible(builder, analyzeCfg(entry, succ), code, entry, succ);
+  }
+  cfg = analyzeCfg(builder.entry); // recompute: reduction may add blocks
   const liveOut = computeLiveness(code, cfg);
   const { slotOf, localsDecl } = allocateSlots(builder, code, liveOut, cfg);
-  const tree = reloop(builder, cfg, code);
+  const tree = reloop(builder, code);
   elideFreshZeroInits(tree, slotOf);
   return { tree, slotOf, localsDecl };
+}
+
+/** Every structural graph root: the function entry plus each region's entries. */
+function regionEntries(flowCfg) {
+  const out = [{ entry: flowCfg.rpo[0] }];
+  for (const b of flowCfg.rpo) {
+    if (b.term?.kind === "try") {
+      out.push({ entry: b.term.region.entry });
+      for (const h of b.term.region.handlers) out.push({ entry: h.entry });
+    }
+  }
+  return out;
 }
 
 /**
@@ -370,6 +417,7 @@ function writeConst(s, node) {
     case "v128": s.bytes(OPS.v128_const).bytes(node.value); break; // value: 16 bytes LE
     case "funcref":
     case "externref":
+    case "exnref":
       s.u8(OPS.ref_null).u8(node.type.code);
       break;
     default:
@@ -462,21 +510,21 @@ function writeElemSegment(s, seg) {
   }
 }
 
-function writeBody(w, { tree, slotOf, localsDecl }) {
+function writeBody(w, { tree, slotOf, localsDecl }, btIndex) {
   w.vec(localsDecl, (s, d) => { s.u32(d.count); writeValType(s, d.type); });
-  writeSeq(w, tree, slotOf);
+  writeSeq(w, tree, slotOf, btIndex);
   // Every CFG block ends in an explicit transfer, so control never actually
   // falls off the end — but when the last item is structured (if/loop/block),
   // the validator still types the fallthrough. Cap it as unreachable.
   const last = tree[tree.length - 1];
   const diverges = last &&
-    ["return", "unreachable", "br", "br_table", "return_call", "return_call_indirect", "return_call_ref"]
+    ["return", "unreachable", "br", "br_table", "return_call", "return_call_indirect", "return_call_ref", "throw", "throw_ref"]
       .includes(last.op);
   if (!diverges) w.u8(OPS.unreachable);
   w.u8(OPS.end);
 }
 
-function writeSeq(w, items, slotOf) {
+function writeSeq(w, items, slotOf, btIndex) {
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const next = items[i + 1];
@@ -487,32 +535,92 @@ function writeSeq(w, items, slotOf) {
       i++;
       continue;
     }
-    writeItem(w, item, slotOf);
+    writeItem(w, item, slotOf, btIndex);
   }
 }
 
-function writeItem(w, item, slotOf) {
+/** Recursively visit try_construct items in a relooper tree. */
+function forEachTryItem(items, fn) {
+  for (const item of items) {
+    switch (item.op) {
+      case "block":
+      case "loop":
+        forEachTryItem(item.body, fn);
+        break;
+      case "if":
+        forEachTryItem(item.then, fn);
+        forEachTryItem(item.else, fn);
+        break;
+      case "try_construct":
+        fn(item);
+        forEachTryItem(item.body, fn);
+        for (const h of item.handlers) forEachTryItem(h.tree, fn);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+/** Catch-target block type: empty, a single valtype, or an interned [] -> payload. */
+function writeBlockType(w, types, btIndex) {
+  if (types.length === 0) w.u8(OPS.blocktype_empty);
+  else if (types.length === 1 && !types[0].heapType) w.u8(types[0].code);
+  else w.s32(btIndex(types));
+}
+
+function writeItem(w, item, slotOf, btIndex) {
   switch (item.op ?? item.k) {
     // structured / control
     case "block":
       w.u8(OPS.block).u8(OPS.blocktype_empty);
-      writeSeq(w, item.body, slotOf);
+      writeSeq(w, item.body, slotOf, btIndex);
       w.u8(OPS.end);
       break;
     case "loop":
       w.u8(OPS.loop).u8(OPS.blocktype_empty);
-      writeSeq(w, item.body, slotOf);
+      writeSeq(w, item.body, slotOf, btIndex);
       w.u8(OPS.end);
       break;
     case "if":
       w.u8(OPS.if).u8(OPS.blocktype_empty);
-      writeSeq(w, item.then, slotOf);
+      writeSeq(w, item.then, slotOf, btIndex);
       if (item.else.length > 0) {
         w.u8(OPS.else);
-        writeSeq(w, item.else, slotOf);
+        writeSeq(w, item.else, slotOf, btIndex);
       }
       w.u8(OPS.end);
       break;
+    case "try_construct": {
+      // block $join { block $h(H-1) { … block $h0 {
+      //   try_table (catch → $h0..$h(H-1)) BODY end; br $join
+      // } handler0; br $join } … } handler(H-1) } — falls into $join.
+      const H = item.handlers.length;
+      w.u8(OPS.block).u8(OPS.blocktype_empty); // $join
+      for (let j = H - 1; j >= 0; j--) {
+        w.u8(OPS.block);
+        writeBlockType(w, item.handlers[j].payloadTypes, btIndex);
+      }
+      w.u8(OPS.try_table).u8(OPS.blocktype_empty);
+      w.u32(H);
+      item.handlers.forEach((h, j) => {
+        w.u8(h.tag === null ? (h.ref ? 0x03 : 0x02) : (h.ref ? 0x01 : 0x00));
+        if (h.tag !== null) w.u32(h.tag.index);
+        w.u32(j); // catch labels resolve outside try_table: j = $h_j
+      });
+      writeSeq(w, item.body, slotOf, btIndex);
+      w.u8(OPS.end); // try_table
+      w.u8(OPS.br).u32(H); // normal completion → $join
+      item.handlers.forEach((h, j) => {
+        w.u8(OPS.end); // $h_j — payload now on the stack
+        writeSeq(w, h.tree, slotOf, btIndex);
+        if (j < H - 1) w.u8(OPS.br).u32(H - 1 - j); // → $join
+      });
+      w.u8(OPS.end); // $join
+      break;
+    }
+    case "throw": w.u8(OPS.throw).u32(item.tag.index); break;
+    case "throw_ref": w.u8(OPS.throw_ref); break;
     case "br": w.u8(OPS.br).u32(item.depth); break;
     case "br_if": w.u8(OPS.br_if).u32(item.depth); break;
     case "br_table":

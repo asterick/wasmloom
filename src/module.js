@@ -227,6 +227,39 @@ export class FuncTypeHandle {
   }
 }
 
+/** An exception tag: a typed signature for thrown values (wasm 3.0 EH). */
+export class TagHandle {
+  constructor(module, params) {
+    this.handleKind = "tag";
+    this.module = module;
+    this.params = params;
+    this.importInfo = null;
+    this.exportName = null;
+    this.index = -1; // assigned at emit
+  }
+
+  import(moduleName, name) {
+    if (this.importInfo) fail(".import(): tag is already imported");
+    if (typeof moduleName !== "string" || typeof name !== "string") {
+      fail(".import(module, name): both arguments must be strings");
+    }
+    this.importInfo = { module: moduleName, name };
+    return this;
+  }
+
+  export(name) {
+    this.module._addExport(name, this, "tag");
+    this.exportName ??= name;
+    return this;
+  }
+
+  /** Debug name for the name section (overrides the export/import-derived one). */
+  name(s) {
+    this.nameStr = checkDebugName(s);
+    return this;
+  }
+}
+
 /** Handle for a table. Element type funcref or externref; limits in elements. */
 export class TableHandle {
   constructor(module, elemType, limits) {
@@ -481,6 +514,7 @@ export class Module {
     this.dataSegments = [];
     this.elemSegments = [];
     this.refFunctions = new Set(); // ref.func'd — auto-declared at emit
+    this.tags = [];
     this._funcTypesByKey = new Map(); // signature interning (typed refs need one handle per shape)
     this.exports = [];
     this.exportNames = new Set();
@@ -573,6 +607,13 @@ export class Module {
     const resolved = resolveModuleInit(this, type, init);
     const handle = new Variable("module", type, { module: this, init: resolved, initExplicit });
     this.variables.push(handle);
+    return handle;
+  }
+
+  /** Declare an exception tag with the given payload types (wasm 3.0 EH). */
+  tag(params) {
+    const handle = new TagHandle(this, checkTypeList(params, "mod.tag params"));
+    this.tags.push(handle);
     return handle;
   }
 

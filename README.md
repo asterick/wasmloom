@@ -60,6 +60,11 @@ fixed-width **SIMD** — plus, from **wasm 3.0** (Node ≥ 22 to run):
   runtime signature check), tail-calling in return position. Tables of
   `sig.refNull` make checked-free vtables: `sig.call(vt.get(i), x)`.
   `sig.ref.of(x)` is the trapping nullable→non-null bridge.
+- **Exception handling** — `mod.tag([types])` declares typed exceptions;
+  `$.throw(tag, …)` raises, `$.try(body).catch(tag, (payload…, $) => {})`
+  chains handlers (plus `catchAll` and `exnref`-carrying `Ref` variants for
+  identity-preserving `$.throwRef` rethrow). Uncaught exceptions surface to
+  JS as `WebAssembly.Exception`; JS exceptions enter through imported tags.
 
 ## Type discipline
 

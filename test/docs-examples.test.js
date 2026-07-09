@@ -12,6 +12,18 @@ import { fileURLToPath } from "node:url";
 const docsDir = fileURLToPath(new URL("../docs/", import.meta.url));
 const srcUrl = new URL("../src/index.js", import.meta.url).href;
 
+// Final-spec exception handling postdates Node 22's V8 — EH examples skip
+// on engines without it (same gate as test/exceptions.test.js).
+const supportsEH =
+  typeof WebAssembly.Tag === "function" &&
+  WebAssembly.validate(new Uint8Array([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    1, 4, 1, 96, 0, 0,
+    3, 2, 1, 0,
+    13, 3, 1, 0, 0,
+    10, 6, 1, 4, 0, 8, 0, 11,
+  ]));
+
 function examplesOf(file) {
   const text = readFileSync(docsDir + file, "utf8");
   const blocks = [...text.matchAll(/```js\n([\s\S]*?)```/g)].map((m) => m[1]);
@@ -26,6 +38,7 @@ for (const page of pages) {
   total += examples.length;
   test(`docs examples run: ${page} (${examples.length})`, () => {
     for (const [i, source] of examples.entries()) {
+      if (!supportsEH && source.includes(".tag(")) continue; // EH example on an old engine
       const code = source.replaceAll('"wasmloom"', JSON.stringify(srcUrl));
       try {
         execFileSync(process.execPath, ["--input-type=module", "-e", code], {

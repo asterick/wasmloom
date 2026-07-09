@@ -7,8 +7,9 @@ State snapshot for picking this project back up. Last updated: 2026-07-08.
 A JavaScript library for generating WebAssembly binaries via expression
 builders — no external toolchain, `mod.emit()` → `Uint8Array`. The whole
 Wasm 2.0 surface is implemented, **including fixed-width SIMD**, plus
-multiple memories, extended constant expressions, tail calls, and typed
-function references from wasm 3.0. 245 tests, all passing (`npm test`,
+multiple memories, extended constant expressions, tail calls, typed
+function references, and exception handling from wasm 3.0. 257 tests, all
+passing (`npm test`,
 Node ≥ 18 — the wasm 3.0 features need a newer engine, Node ≥ 22 in
 practice; zero dependencies).
 
@@ -34,7 +35,12 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
                      locals share slots across disjoint live ranges,
                      pooled by wasm storage type)
                  ─► relooper (passes/relooper.js: Ramsey's "Beyond
-                     Relooper"; expects reducible input — reduce runs first)
+                     Relooper"; expects reducible input — reduce runs first.
+                     Region-recursive: try bodies/handlers are islands
+                     relooped as sub-graphs; flow-view CFG (exceptional
+                     edges) drives liveness/slots, structural view drives
+                     reduce/reloop — see cfg.js successors vs
+                     structuralSuccessors)
                  ─► encoder (encode/encoder.js + leb.js: sections, LEB128;
                      peepholes: set+get → local.tee, fresh-slot zero-init
                      elision in the entry prefix — never loops, never params)
@@ -104,6 +110,10 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
 - `memory-sweep` — all load/store variants vs DataView; bulk-op semantics.
 - `simd` — behavioral: masks end-to-end, shape-barrier errors, casts,
   v128 variables/globals, lane memory ops, shuffle/swizzle.
+- `exceptions` — EH: payload/clause-order/catchAll, unwinding through
+  calls, exnref stash + rethrow identity, JS interop both directions,
+  island-rule and chain eager errors, tail suppression under try. Runtime-
+  gated (final-spec EH needs Node ≥ 24); byte-stability included.
 - `typedref` — typed function references: call_ref through params/globals/
   locals/tables, interning identity, promotion directions, the .of bridge
   and null traps, nullable-slot lowering, return_call_ref by depth.
