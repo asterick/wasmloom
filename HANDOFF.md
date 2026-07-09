@@ -160,15 +160,16 @@ Bryon. Remaining spec landscape if ever needed: memory64, relaxed SIMD.
 
 ## Working conventions
 
-- Repo: github.com/asterick/wasmloom (private). Commit style: imperative
+- Repo: github.com/asterick/wasmloom (PUBLIC). Commit style: imperative
   summary + body, Claude co-author trailer.
 - **main is protected — never commit to it directly.** Two repo rulesets:
   "pr-and-review" (PR required, 1 code-owner review — CODEOWNERS:
   @asterick — no force pushes/deletion; repo ADMINS may merge a PR without
-  review via PR-mode bypass) and "ci-green" (test 22.x/24.x + types must
-  pass — no bypass, binds admins too). Direct pushes are blocked for
-  everyone including admins. Workflow: branch, push, `gh pr create`, hand
-  to Bryon — he can merge without approval; anyone else needs his review.
+  review via PR-mode bypass) and "ci-green" (test 22.x/24.x + types + lint
+  must pass — no bypass, binds admins too). Direct pushes are blocked for
+  everyone including admins. Workflow: branch, push, `gh pr create`, and
+  STOP — hand the PR to Bryon and NEVER merge it yourself (standing
+  instruction, 2026-07-09).
 - `index.d.ts` is GENERATED (`npm run types`, scripts/generate-dts.js) from
   `VENEER_OPS` + a hand-maintained skeleton; `test/dts.test.js` fails when
   stale. After touching the veneer, regenerate and commit both. Typecheck
