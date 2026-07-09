@@ -2,7 +2,7 @@
 // Regenerate with `npm run types`; test/dts.test.js fails when this is stale.
 
 export type TypeName =
-  "s32" | "u32" | "s64" | "u64" | "f32" | "f64" | "bool" | "funcref" | "externref" | "s8x16" | "u8x16" | "s16x8" | "u16x8" | "s32x4" | "u32x4" | "s64x2" | "u64x2" | "f32x4" | "f64x2" | "m8x16" | "m16x8" | "m32x4" | "m64x2";
+  "s32" | "u32" | "s64" | "u64" | "f32" | "f64" | "bool" | "funcref" | "externref" | "exnref" | "s8x16" | "u8x16" | "s16x8" | "u16x8" | "s32x4" | "u32x4" | "s64x2" | "u64x2" | "f32x4" | "f64x2" | "m8x16" | "m16x8" | "m32x4" | "m64x2";
 
 /** Typed function reference brand: (ref $sig) / (ref null $sig). */
 export type RefBrand<
@@ -26,6 +26,7 @@ type Accepts = {
   bool: "bool";
   funcref: "funcref";
   externref: "externref";
+  exnref: "exnref";
   s8x16: "s8x16";
   u8x16: "u8x16";
   s16x8: "s16x8";
@@ -104,6 +105,12 @@ export interface Ctx<R extends readonly WasmType[] = WasmType[]> {
   switch(index: I32ish, targets: readonly Label[], defaultTarget: Label): void;
   /** Returning a call's results directly emits a tail call (return_call). */
   return(...values: IntoArgs<R>): void;
+  /** Throw an exception with the tag's payload. A terminator, like return. */
+  throw<CP extends readonly WasmType[]>(tag: Tag<CP>, ...args: IntoArgs<CP>): void;
+  /** Rethrow a caught exception (exnref), preserving its identity. */
+  throwRef(exn: Into<"exnref">): void;
+  /** Protected region; handlers chain after. Bodies are control-flow islands. */
+  try(body: (ctx: Ctx<R>) => void): TryChain<R>;
   drop(value: Expr): void;
   unreachable(): void;
   if(cond: Into<"bool">, body: (ctx: Ctx<R>) => void): IfChain<R>;
@@ -142,6 +149,26 @@ export interface FuncType<P extends readonly WasmType[] = WasmType[], R extends 
   readonly refNull: NullableRefType<P, R>;
   /** call_ref through a typed reference (traps on null). Tail in $.return. */
   call(ref: Expr<RefBrand<P, R, boolean>>, ...args: IntoArgs<P>): CallResult<R>;
+}
+
+/** An exception tag: the typed signature of thrown values (wasm 3.0 EH). */
+export interface Tag<P extends readonly WasmType[] = WasmType[]> {
+  readonly params: P;
+  import(module: string, name: string): this;
+  export(name: string): this;
+  /** Debug name for the name section (overrides export/import-derived). */
+  name(name: string): this;
+}
+
+export interface TryChain<R extends readonly WasmType[]> {
+  /** First matching clause wins; the payload arrives as typed variables. */
+  catch<CP extends readonly WasmType[]>(
+    tag: Tag<CP>, cb: (...args: [...VarsOf<CP>, Ctx<R>]) => void): TryChain<R>;
+  /** Like catch, plus an exnref for $.throwRef rethrows. */
+  catchRef<CP extends readonly WasmType[]>(
+    tag: Tag<CP>, cb: (...args: [...VarsOf<CP>, Var<"exnref">, Ctx<R>]) => void): TryChain<R>;
+  catchAll(cb: (ctx: Ctx<R>) => void): TryChain<R>;
+  catchAllRef(cb: (exn: Var<"exnref">, ctx: Ctx<R>) => void): TryChain<R>;
 }
 
 export interface Limits { min: number; max?: number }
@@ -199,6 +226,7 @@ export class Module {
   function<P extends readonly WasmType[], R extends readonly WasmType[]>(type: FuncType<P, R>): Func<P, R>;
   funcType<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): FuncType<P, R>;
   variable<W extends WasmType>(type: W, init?: GlobalInit<NameOf<W>>): Global<NameOf<W>>;
+  tag<const P extends readonly WasmType[]>(params: P): Tag<P>;
   memory(limits: Limits): Memory;
   table<E extends WasmType<"funcref"> | WasmType<"externref"> | NullableRefType<readonly WasmType[], readonly WasmType[]>>(
     elemType: E, limits: Limits): Table<NameOf<E>>;
@@ -466,6 +494,10 @@ export interface Ns_externref extends WasmType<"externref"> {
   null(): Expr<"externref">;
   is_null(a: Into<"externref">): Expr<"bool">;
   select(a: Into<"bool">, b: Into<"externref">, c: Into<"externref">): Expr<"externref">;
+}
+export interface Ns_exnref extends WasmType<"exnref"> {
+  null(): Expr<"exnref">;
+  is_null(a: Into<"exnref">): Expr<"bool">;
 }
 export interface Ns_s8x16 extends WasmType<"s8x16"> {
   const(lanes: readonly number[]): Expr<"s8x16">;
@@ -911,6 +943,7 @@ export const f64: Ns_f64;
 export const bool: Ns_bool;
 export const funcref: Ns_funcref;
 export const externref: Ns_externref;
+export const exnref: Ns_exnref;
 export const s8x16: Ns_s8x16;
 export const u8x16: Ns_u8x16;
 export const s16x8: Ns_s16x8;

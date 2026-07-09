@@ -1,5 +1,5 @@
 import { fail } from "./errors.js";
-import { checkValType } from "./types.js";
+import { checkValType, exnref } from "./types.js";
 import { resolveInt32, resolveBool, defaultInit } from "./expr.js";
 import { isRef } from "./types.js";
 import { Block, Label, successors } from "./cfg.js";
@@ -22,6 +22,7 @@ export class FunctionBuilder {
     this.module = module;
     this.handle = handle;
     this.blocks = [];
+    this.currentRegion = null; // innermost try/handler region being recorded
     this.entry = this.newBlock();
     this.current = this.entry;
     this.nodes = [];
@@ -34,6 +35,7 @@ export class FunctionBuilder {
 
   newBlock() {
     const b = new Block();
+    b.region = this.currentRegion;
     this.blocks.push(b);
     return b;
   }
@@ -69,12 +71,23 @@ export class FunctionBuilder {
     this.current = this.newBlock();
   }
 
-  /** Finalize a pending if-chain that ended without .else(). */
+  /** Finalize a pending if- or try-chain interrupted by the next statement. */
   flush() {
     const chain = this.pendingChain;
     if (chain) {
       this.pendingChain = null;
       chain._finalizeWithoutElse();
+    }
+  }
+
+  /** Island rule: labels and gotos may not cross a try/handler boundary. */
+  checkRegion(label, what) {
+    if (label.block.region !== this.currentRegion) {
+      fail(
+        `${what}: the label is in a different try/handler region — control flow may not cross ` +
+        `a try boundary (communicate through variables, or leave with $.return / $.throw)`,
+        label,
+      );
     }
   }
 
@@ -86,6 +99,7 @@ export class FunctionBuilder {
 
   placeLabel(label) {
     this.flush();
+    this.checkRegion(label, "label.here()");
     label.placed = true;
     this.terminate({ kind: "jump", target: label.block });
     this.current = label.block;
@@ -103,7 +117,9 @@ export class FunctionBuilder {
     const reachable = this.computeReachable();
     for (const block of this.blocks) {
       if (block.term === null && reachable.has(block)) {
-        if (this.handle.results.length === 0) {
+        if (block.region) {
+          block.term = { kind: "jump", target: block.region.join };
+        } else if (this.handle.results.length === 0) {
           block.term = { kind: "return", values: [] };
         } else {
           fail(`function ${this.handle.debugName()}: control can reach the end of the body without returning a value`);
@@ -145,6 +161,89 @@ export class FunctionBuilder {
       }
     }
     return seen;
+  }
+}
+
+/** Chainable $.try(fn).catch(tag, fn).catchRef(tag, fn).catchAll(fn).catchAllRef(fn). */
+class TryChain {
+  constructor(builder, $, region) {
+    this.b = builder;
+    this.$ = $;
+    this.region = region;
+    this.state = "open";
+  }
+
+  _addHandler(what, tag, ref, cb) {
+    // validate first — a rejected clause must not finalize the chain
+    if (this.state === "flushed" || this.b.pendingChain !== this) {
+      fail(`${what}: this try-chain was finalized by an intervening statement`);
+    }
+    const b = this.b;
+    if (typeof cb !== "function") fail(`${what}: expected a handler callback`);
+    if (tag !== null) {
+      if (tag?.handleKind !== "tag") fail(`${what}: expected a tag handle (mod.tag)`);
+      if (tag.module !== b.module) fail(`${what}: tag belongs to a different module`);
+      if (this.region.handlers.some((h) => h.tag === tag)) {
+        fail(`${what}: duplicate catch for this tag — the first matching clause already wins`);
+      }
+    }
+    if (this.region.handlers.some((h) => h.tag === null)) {
+      fail(`${what}: unreachable — a .catchAll clause already catches everything`);
+    }
+    this.b.pendingChain = null;
+    const params = tag ? tag.params : [];
+    const handlerRegion = { kind: "handler", parent: this.region.parent, join: this.region.join, entry: null, handlers: [] };
+    b.currentRegion = handlerRegion;
+    const entry = b.newBlock();
+    handlerRegion.entry = entry;
+    const paramVars = params.map(
+      (t) => new Variable("function", t, { builder: b, vlocal: b.newVLocal(t, "var") }),
+    );
+    const exnVar = ref
+      ? new Variable("function", exnref, { builder: b, vlocal: b.newVLocal(exnref, "var") })
+      : null;
+    // catch pushes p0..pn-1 (+exnref on top for the _ref forms); sets pop in reverse
+    entry.handlerPops = [
+      ...(ref ? [exnVar.vlocal] : []),
+      ...params.map((_, i) => paramVars[params.length - 1 - i].vlocal),
+    ];
+    b.current = entry;
+    try {
+      cb(...paramVars, ...(ref ? [exnVar] : []), b.$);
+      b.flush();
+    } finally {
+      b.currentRegion = this.region.parent;
+    }
+    if (b.current.term === null) b.current.term = { kind: "jump", target: this.region.join };
+    b.current = this.region.join;
+    this.region.handlers.push({
+      tag: tag ?? null,
+      ref,
+      entry,
+      payloadTypes: [...params, ...(ref ? [exnref] : [])],
+    });
+    b.pendingChain = this;
+    return this;
+  }
+
+  catch(tag, cb) {
+    return this._addHandler("$.try().catch()", tag, false, cb);
+  }
+
+  catchRef(tag, cb) {
+    return this._addHandler("$.try().catchRef()", tag, true, cb);
+  }
+
+  catchAll(cb) {
+    return this._addHandler("$.try().catchAll()", null, false, cb);
+  }
+
+  catchAllRef(cb) {
+    return this._addHandler("$.try().catchAllRef()", null, true, cb);
+  }
+
+  _finalizeWithoutElse() {
+    this.state = "flushed";
   }
 }
 
@@ -236,6 +335,7 @@ function makeDollar(b) {
     goto(target) {
       b.flush();
       const l = b.checkLabel(target, "$.goto");
+      b.checkRegion(l, "$.goto");
       l.referenced = true;
       b.terminate({ kind: "jump", target: l.block });
     },
@@ -243,6 +343,7 @@ function makeDollar(b) {
     gotoIf(cond, target) {
       b.flush();
       const l = b.checkLabel(target, "$.gotoIf");
+      b.checkRegion(l, "$.gotoIf");
       l.referenced = true;
       const c = resolveBool(cond, "$.gotoIf condition");
       c.consumers.push({ block: b.current });
@@ -256,6 +357,7 @@ function makeDollar(b) {
       if (!Array.isArray(targets)) fail("$.switch: targets must be an array of labels");
       const ts = targets.map((t, i) => b.checkLabel(t, `$.switch target ${i}`));
       const d = b.checkLabel(defaultTarget, "$.switch default");
+      for (const l of [...ts, d]) b.checkRegion(l, "$.switch");
       for (const l of [...ts, d]) l.referenced = true;
       const idx = resolveInt32(index, "$.switch index");
       idx.consumers.push({ block: b.current });
@@ -277,6 +379,57 @@ function makeDollar(b) {
       const resolved = values.map((v, i) => resolveOperand(v, expected[i], `$.return value ${i + 1}`));
       for (const r of resolved) r.consumers.push({ block: b.current });
       b.terminate({ kind: "return", values: resolved });
+    },
+
+    /** Throw an exception with the tag's payload. A terminator, like $.return. */
+    throw(tag, ...args) {
+      b.flush();
+      if (tag?.handleKind !== "tag") fail("$.throw: expected a tag handle (mod.tag)");
+      if (tag.module !== b.module) fail("$.throw: tag belongs to a different module");
+      if (args.length !== tag.params.length) {
+        fail(`$.throw: tag expects ${tag.params.length} value(s), got ${args.length}`);
+      }
+      const resolved = args.map((v, i) => resolveOperand(v, tag.params[i], `$.throw value ${i + 1}`));
+      for (const r of resolved) r.consumers.push({ block: b.current });
+      b.terminate({ kind: "throw", tag, args: resolved });
+    },
+
+    /** Rethrow a caught exception (exnref), preserving its identity. */
+    throwRef(exn) {
+      b.flush();
+      const v = resolveOperand(exn, exnref, "$.throwRef");
+      v.consumers.push({ block: b.current });
+      b.terminate({ kind: "throwRef", value: v });
+    },
+
+    /**
+     * Protected region: exceptions thrown inside route to the chained
+     * handlers (first matching clause wins), which fall through to the code
+     * after the try. Bodies and handlers are control-flow islands — gotos
+     * may not cross their boundary; variables, $.return, and $.throw may.
+     */
+    try(cb) {
+      b.flush();
+      if (typeof cb !== "function") fail("$.try: expected a body callback");
+      const parent = b.currentRegion;
+      const join = b.newBlock();
+      const region = { kind: "try", parent, join, entry: null, handlers: [] };
+      if (b.current.term) b.current = b.newBlock();
+      b.current.term = { kind: "try", region };
+      b.currentRegion = region;
+      region.entry = b.newBlock();
+      b.current = region.entry;
+      try {
+        cb(b.$);
+        b.flush();
+      } finally {
+        b.currentRegion = parent;
+      }
+      if (b.current.term === null) b.current.term = { kind: "jump", target: join };
+      b.current = join;
+      const chain = new TryChain(b, b.$, region);
+      b.pendingChain = chain;
+      return chain;
     },
 
     drop(value) {

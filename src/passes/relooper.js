@@ -1,4 +1,6 @@
 import { fail } from "../errors.js";
+import { structuralSuccessors } from "../cfg.js";
+import { analyzeCfg } from "./dominators.js";
 
 /**
  * Reconstruct structured control flow (block/loop/if/br/br_if/br_table) from
@@ -12,7 +14,19 @@ import { fail } from "../errors.js";
  *   { op: 'br_table', targets: number[], defaultDepth: number }
  *   { op: 'return' } | { op: 'unreachable' }
  */
-export function reloop(builder, cfg, code) {
+export function reloop(builder, code) {
+  return reloopGraph(builder, code, builder.entry, []);
+}
+
+/**
+ * Reloop one region-local structural graph. `baseCtx` seats enclosing frames
+ * the encoder will materialize around this tree (a try body sees its join at
+ * the try_table frame; each handler sees it through the handler-block
+ * ladder), so brDepth resolves region exits without knowing the nesting.
+ */
+function reloopGraph(builder, code, entry, baseCtx) {
+  const graphRegion = entry.region;
+  const cfg = analyzeCfg(entry, (b) => structuralSuccessors(b).filter((x) => x.region === graphRegion));
   const { rpo, rpoIndex, preds, idom, dominates } = cfg;
 
   const isLoopHeader = new Map();
@@ -97,6 +111,22 @@ export function reloop(builder, cfg, code) {
     switch (t.kind) {
       case "return":
         return [{ op: "return" }];
+      case "throw":
+        return [{ op: "throw", tag: t.tag }];
+      case "throwRef":
+        return [{ op: "throw_ref" }];
+      case "try": {
+        const region = t.region;
+        const H = region.handlers.length;
+        // body: br 0 (= the try_table frame) exits to the funnel br after it
+        const body = reloopGraph(builder, code, region.entry, [region.join]);
+        const handlers = region.handlers.map((h, j) => {
+          // handler j (0 innermost) sits H-1-j blocks inside the join wrapper
+          const pads = Array.from({ length: H - 1 - j }, () => ({ pad: true }));
+          return { tag: h.tag, ref: h.ref, payloadTypes: h.payloadTypes, tree: reloopGraph(builder, code, h.entry, [...pads, region.join]) };
+        });
+        return [{ op: "try_construct", handlers, body }, ...goOrPlace(region.join, ctx)];
+      }
       case "returnCall":
         return [{ op: "return_call", fn: t.func }];
       case "returnCallRef":
@@ -137,5 +167,5 @@ export function reloop(builder, cfg, code) {
     }
   }
 
-  return doTree(rpo[0], []);
+  return doTree(rpo[0], baseCtx);
 }

@@ -1,7 +1,7 @@
 import { fail } from "./errors.js";
 import { OPTABLE } from "./optable.js";
 import {
-  i32 as I32, i64 as I64, f32, f64, s32, u32, s64, u64, bool, funcref, externref, isRef, isVec,
+  i32 as I32, i64 as I64, f32, f64, s32, u32, s64, u64, bool, funcref, externref, exnref, isRef, isVec,
   makeTypedRefs,
   s8x16, u8x16, s16x8, u16x8, s32x4, u32x4, s64x2, u64x2, f32x4, f64x2, m8x16, m16x8, m32x4, m64x2,
 } from "./types.js";
@@ -424,6 +424,7 @@ function buildRefNamespace(T) {
 }
 buildRefNamespace(funcref);
 buildRefNamespace(externref);
+buildRefNamespace(exnref);
 
 /**
  * Typed function references (wasm 3.0): build `sig.ref` / `sig.refNull` for a
@@ -1014,6 +1015,6 @@ export function promoteConst(node, target) {
 }
 
 export {
-  s32, u32, s64, u64, f32, f64, bool, funcref, externref,
+  s32, u32, s64, u64, f32, f64, bool, funcref, externref, exnref,
   s8x16, u8x16, s16x8, u16x8, s32x4, u32x4, s64x2, u64x2, f32x4, f64x2, m8x16, m16x8, m32x4, m64x2,
 };

@@ -26,6 +26,11 @@ import { describeNode } from "../node.js";
  * result, a second consumer — correctly leaves the call in place.
  */
 function rewriteTailCall(block, out) {
+  // A tail call replaces the frame, escaping any enclosing try_table's
+  // protection — inside one, the call must stay a plain call.
+  for (let r = block.region; r; r = r.parent) {
+    if (r.kind === "try") return;
+  }
   const t = block.term;
   let i = out.length;
   const gets = [];
@@ -195,6 +200,11 @@ export function linearize(builder, cfg) {
       }
     };
 
+    // Handler entries receive the catch payload on the stack (exnref on top
+    // for the _ref forms); it pops straight into the payload variables.
+    if (block.handlerPops) {
+      for (const v of block.handlerPops) out.push({ k: "set", v });
+    }
     for (const item of block.items) {
       if (item.kind === "mark") {
         const node = item.node;
@@ -210,6 +220,8 @@ export function linearize(builder, cfg) {
     const t = block.term;
     if (t.kind === "branch") emitTree(t.cond);
     else if (t.kind === "switch") emitTree(t.index);
+    else if (t.kind === "throw") for (const v of t.args) emitTree(v);
+    else if (t.kind === "throwRef") emitTree(t.value);
     else if (t.kind === "return") {
       for (const v of t.values) emitTree(v);
       if (builder.module.tailCalls) rewriteTailCall(block, out);

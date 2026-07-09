@@ -11,7 +11,7 @@ import { VENEER_OPS } from "../src/expr.js";
  * stale.
  */
 
-const SCALARS = ["s32", "u32", "s64", "u64", "f32", "f64", "bool", "funcref", "externref"];
+const SCALARS = ["s32", "u32", "s64", "u64", "f32", "f64", "bool", "funcref", "externref", "exnref"];
 const VECS = ["s8x16", "u8x16", "s16x8", "u16x8", "s32x4", "u32x4", "s64x2", "u64x2", "f32x4", "f64x2"];
 const MASKS = ["m8x16", "m16x8", "m32x4", "m64x2"];
 const ALL = [...SCALARS, ...VECS, ...MASKS];
@@ -163,6 +163,12 @@ export function generateDts() {
   push("  switch(index: I32ish, targets: readonly Label[], defaultTarget: Label): void;");
   push("  /** Returning a call's results directly emits a tail call (return_call). */");
   push("  return(...values: IntoArgs<R>): void;");
+  push("  /** Throw an exception with the tag's payload. A terminator, like return. */");
+  push("  throw<CP extends readonly WasmType[]>(tag: Tag<CP>, ...args: IntoArgs<CP>): void;");
+  push("  /** Rethrow a caught exception (exnref), preserving its identity. */");
+  push("  throwRef(exn: Into<\"exnref\">): void;");
+  push("  /** Protected region; handlers chain after. Bodies are control-flow islands. */");
+  push("  try(body: (ctx: Ctx<R>) => void): TryChain<R>;");
   push("  drop(value: Expr): void;");
   push("  unreachable(): void;");
   push("  if(cond: Into<\"bool\">, body: (ctx: Ctx<R>) => void): IfChain<R>;");
@@ -201,6 +207,26 @@ export function generateDts() {
   push("  readonly refNull: NullableRefType<P, R>;");
   push("  /** call_ref through a typed reference (traps on null). Tail in $.return. */");
   push("  call(ref: Expr<RefBrand<P, R, boolean>>, ...args: IntoArgs<P>): CallResult<R>;");
+  push("}");
+  push("");
+  push("/** An exception tag: the typed signature of thrown values (wasm 3.0 EH). */");
+  push("export interface Tag<P extends readonly WasmType[] = WasmType[]> {");
+  push("  readonly params: P;");
+  push("  import(module: string, name: string): this;");
+  push("  export(name: string): this;");
+  push("  /** Debug name for the name section (overrides export/import-derived). */");
+  push("  name(name: string): this;");
+  push("}");
+  push("");
+  push("export interface TryChain<R extends readonly WasmType[]> {");
+  push("  /** First matching clause wins; the payload arrives as typed variables. */");
+  push("  catch<CP extends readonly WasmType[]>(");
+  push("    tag: Tag<CP>, cb: (...args: [...VarsOf<CP>, Ctx<R>]) => void): TryChain<R>;");
+  push("  /** Like catch, plus an exnref for $.throwRef rethrows. */");
+  push("  catchRef<CP extends readonly WasmType[]>(");
+  push("    tag: Tag<CP>, cb: (...args: [...VarsOf<CP>, Var<\"exnref\">, Ctx<R>]) => void): TryChain<R>;");
+  push("  catchAll(cb: (ctx: Ctx<R>) => void): TryChain<R>;");
+  push("  catchAllRef(cb: (exn: Var<\"exnref\">, ctx: Ctx<R>) => void): TryChain<R>;");
   push("}");
   push("");
   push("export interface Limits { min: number; max?: number }");
@@ -258,6 +284,7 @@ export function generateDts() {
   push("  function<P extends readonly WasmType[], R extends readonly WasmType[]>(type: FuncType<P, R>): Func<P, R>;");
   push("  funcType<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): FuncType<P, R>;");
   push("  variable<W extends WasmType>(type: W, init?: GlobalInit<NameOf<W>>): Global<NameOf<W>>;");
+  push("  tag<const P extends readonly WasmType[]>(params: P): Tag<P>;");
   push("  memory(limits: Limits): Memory;");
   push("  table<E extends WasmType<\"funcref\"> | WasmType<\"externref\"> | NullableRefType<readonly WasmType[], readonly WasmType[]>>(");
   push("    elemType: E, limits: Limits): Table<NameOf<E>>;");
@@ -281,7 +308,7 @@ export function generateDts() {
       const from = CASTS[name].map((x) => `"${x}"`).join(" | ");
       push(`  cast(x: Expr<${from}> | Var<${from}> | Global<${from}>): Expr<"${name}">;`);
     }
-    if (name === "funcref" || name === "externref") push(`  null(): Expr<"${name}">;`);
+    if (name === "funcref" || name === "externref" || name === "exnref") push(`  null(): Expr<"${name}">;`);
     const seen = new Set();
     for (const v of VENEER_OPS) {
       if (v.ns !== name || v.mem === "bulk") continue;

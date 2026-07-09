@@ -1,6 +1,6 @@
 import { fail } from "../errors.js";
 import { s32 } from "../types.js";
-import { successors } from "../cfg.js";
+import { structuralSuccessors } from "../cfg.js";
 import { analyzeCfg } from "./dominators.js";
 
 /**
@@ -27,7 +27,7 @@ import { analyzeCfg } from "./dominators.js";
  * is spent. Split rounds each add at least one block and dispatch rounds fix
  * strictly nested regions, so the process converges.
  */
-export function makeReducible(builder, cfg, code) {
+export function makeReducible(builder, cfg, code, entry, succ) {
   const budget = builder.blocks.length * 3 + 32;
   let selector = null;
 
@@ -48,7 +48,7 @@ export function makeReducible(builder, cfg, code) {
       fail("internal: irreducibility lowering did not converge");
     }
 
-    const found = findMultiEntryLoop(cfg.rpo, cfg.preds, cfg.rpoIndex);
+    const found = findMultiEntryLoop(cfg.rpo, cfg.preds, cfg.rpoIndex, succ);
     if (!found) fail("internal: retreating edge without a multi-entry loop");
     const { scc, entries } = found;
 
@@ -67,7 +67,7 @@ export function makeReducible(builder, cfg, code) {
     const work = entries.filter((e) => e !== header);
     for (const e of work) region.add(e);
     while (work.length) {
-      for (const s of successors(work.pop())) {
+      for (const s of succ(work.pop())) {
         if (scc.has(s) && s !== header && !region.has(s)) {
           region.add(s);
           work.push(s);
@@ -76,12 +76,12 @@ export function makeReducible(builder, cfg, code) {
     }
 
     if (builder.blocks.length + region.size <= budget) {
-      splitRegion(builder, cfg, code, scc, region);
+      splitRegion(builder, cfg, code, scc, region, succ);
     } else {
       selector ??= builder.newVLocal(s32, "temp");
       dispatchLoop(builder, cfg, code, scc, entries, selector);
     }
-    cfg = analyzeCfg(builder.entry);
+    cfg = analyzeCfg(entry, succ);
   }
 }
 
@@ -105,11 +105,11 @@ function retargetTerm(term, map) {
  * `nodes` is the current subgraph in RPO order; `preds` is whole-graph, so a
  * peeled header counts as an outside edge for the loops nested under it.
  */
-function findMultiEntryLoop(nodes, preds, rpoIndex) {
+function findMultiEntryLoop(nodes, preds, rpoIndex, succ) {
   const inSubgraph = new Set(nodes);
-  for (const scc of stronglyConnected(nodes, inSubgraph)) {
+  for (const scc of stronglyConnected(nodes, inSubgraph, succ)) {
     const members = [...scc].sort((a, b) => rpoIndex.get(a) - rpoIndex.get(b));
-    if (members.length === 1 && !successors(members[0]).includes(members[0])) continue;
+    if (members.length === 1 && !succ(members[0]).includes(members[0])) continue;
     const entries = members.filter((b) => preds.get(b).some((p) => !scc.has(p)));
     if (entries.length > 1) return { scc, entries };
     // Single entry (or none: the loop contains the function entry, which has
@@ -117,7 +117,7 @@ function findMultiEntryLoop(nodes, preds, rpoIndex) {
     const header = entries[0] ?? members[0];
     const inner = members.filter((b) => b !== header);
     if (inner.length > 0) {
-      const found = findMultiEntryLoop(inner, preds, rpoIndex);
+      const found = findMultiEntryLoop(inner, preds, rpoIndex, succ);
       if (found) return found;
     }
   }
@@ -125,7 +125,7 @@ function findMultiEntryLoop(nodes, preds, rpoIndex) {
 }
 
 /** Tarjan's SCC over the subgraph induced by `inSubgraph`, iteratively. */
-function stronglyConnected(order, inSubgraph) {
+function stronglyConnected(order, inSubgraph, succ) {
   const index = new Map();
   const low = new Map();
   const onStack = new Set();
@@ -142,7 +142,7 @@ function stronglyConnected(order, inSubgraph) {
     onStack.add(root);
     while (frames.length > 0) {
       const f = frames[frames.length - 1];
-      const succs = successors(f.block).filter((s) => inSubgraph.has(s));
+      const succs = succ(f.block).filter((s) => inSubgraph.has(s));
       if (f.i < succs.length) {
         const s = succs[f.i++];
         if (!index.has(s)) {
@@ -182,10 +182,12 @@ function stronglyConnected(order, inSubgraph) {
  * originals then have no outside predecessors, so the header is the loop's
  * only entry. Copies share their original's instruction array.
  */
-function splitRegion(builder, cfg, code, scc, region) {
+function splitRegion(builder, cfg, code, scc, region, succ) {
+  void succ;
   const copies = new Map();
   for (const b of region) {
     const c = builder.newBlock();
+    c.region = b.region; // copies stay in their try/handler region
     code.set(c, code.get(b));
     copies.set(b, c);
   }
@@ -215,6 +217,7 @@ function splitRegion(builder, cfg, code, scc, region) {
  */
 function dispatchLoop(builder, cfg, code, scc, entries, selector) {
   const dispatch = builder.newBlock();
+  dispatch.region = entries[0].region; // stays inside the try/handler region
   code.set(dispatch, [{ k: "get", v: selector }]);
   dispatch.term = {
     kind: "switch",
@@ -229,6 +232,7 @@ function dispatchLoop(builder, cfg, code, scc, entries, selector) {
       let tramp = trampolines.get(inside);
       if (!tramp) {
         tramp = builder.newBlock();
+        tramp.region = e.region;
         code.set(tramp, [{ k: "const", type: s32, value: i }, { k: "set", v: selector }]);
         tramp.term = { kind: "jump", target: dispatch };
         trampolines.set(inside, tramp);

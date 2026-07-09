@@ -34,6 +34,7 @@ toolchain; emits binary `.wasm` bytes directly.
 | SIMD masks | Comparisons produce dedicated mask types (`m8x16`/`m16x8`/`m32x4`/`m64x2`) — the SIMD analog of `bool`. `bitselect` requires a shape-matched mask; `any_true`/`all_true` (→ `bool`) and `bitmask` (→ `u32`) live on masks. Masks are not data and not conditions |
 | SIMD v128 ops | Lane-agnostic instructions (bitwise, `bitselect`, plain load/store) appear on every integer lane namespace and mask — no bare `v128` type in the public API. Every v128 view retypes into any other via zero-cost `cast` (the universal bridge; there is no wasm instruction to select). Floats keep the scalar discipline: no bitwise ops without casting to an integer view |
 | Diagnostics | `new Module({ debug: true })` captures creation stack traces for emit-time errors |
+| Exceptions | Tags are entities (`mod.tag([types])`, import/export/name). `$.throw`/`$.throwRef` are terminators on `$`; `$.try(body).catch(tag, cb).catchRef(tag, cb).catchAll(cb).catchAllRef(cb)` — payload as typed variable handles, first match wins, handlers run unprotected and fall to the join. **Try regions are control-flow islands**: gotos/labels never cross the boundary (eager error); variables, `$.return`, `$.throw` do. Bodies/handlers compile as nested sub-CFGs (relooped per region); exceptional edges feed liveness so slot sharing stays sound; implicit tail calls are suppressed under protection. `exnref` is a first-class variable type |
 | Name section | Emitted by default: debug names auto-derive (export name, else "module.name" for imports); `.name("str")` chains on every module-level handle and `mod.name()` names the module; `names: false` strips. Locals deliberately unnamed (slot sharing). `debug` stays byte-neutral — names are independent of it |
 | Types | Plain JS with JSDoc annotations; `index.d.ts` is generated from the veneer registry (`npm run types` — tsc can't see the dynamically attached constructors), typed end-to-end: param tuples infer body-callback `Var`s, operand slots accept exactly the safe promotions, masks/shapes are barriers in TS too |
 | Testing | Round-trip: instantiate output with V8 (`node --test`), assert executed results |
@@ -381,8 +382,8 @@ The following are recognized but **must not be implemented until the API is
 discussed and locked down** in a future planning session. Nothing in the core
 may assume a shape for these beyond what's noted here.
 
-- Already out of spec scope (no design needed yet): GC types, exception
-  handling, threads/atomics, tail calls, multi-memory, memory64.
+- Already out of spec scope (no design needed yet): GC types,
+  threads/atomics, memory64, relaxed SIMD.
 
 ## Pinned — might revisit later
 
