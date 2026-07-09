@@ -10,7 +10,7 @@ current frame instead of growing the stack. Deep self- or mutual recursion
 runs in constant space — no trampoline, no explicit form to remember.
 
 ```js
-import { Module, s64 } from "wasmemit";
+import { Module, s64 } from "wasmloom";
 
 const mod = new Module();
 const sum = mod.function([s64, s64], [s64]);
@@ -30,7 +30,7 @@ if (instance.exports.sum(10_000_000n) !== 50000005000000n) throw new Error("unex
 ## The rule
 
 `$.return` performs a tail call when **the returned values are exactly the
-results of a call evaluated last**. Because of wasmemit's
+results of a call evaluated last**. Because of wasmloom's
 [evaluation-order semantics](expressions.md) this is a precise property, not
 a heuristic. Concretely, all of these convert:
 
@@ -60,7 +60,7 @@ State machines fall out naturally — each state is a function, transitions are
 returns of calls:
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 const even = mod.function([s32], [s32]);

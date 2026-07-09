@@ -2,7 +2,7 @@
 
 [← Manual index](index.md)
 
-wasmemit ships `index.d.ts`, and it is **generated from the same registry the
+wasmloom ships `index.d.ts`, and it is **generated from the same registry the
 test sweeps execute** (`npm run types`), so it can't drift from the
 implementation — a test fails if it's stale, and CI typechecks it under
 `tsc --strict`. It's not a loose façade; the library's semantics are encoded:
@@ -36,4 +36,4 @@ ref, and downcasts or cross-signature `sig.call`s don't compile.
   and cross-module handles remain build-time (eager) errors rather than
   compile-time ones. See [Errors and debugging](errors.md).
 - Regenerate with `npm run types` after modifying the veneer if you're
-  working on wasmemit itself; `test/dts.test.js` enforces freshness.
+  working on wasmloom itself; `test/dts.test.js` enforces freshness.

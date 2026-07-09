@@ -3,7 +3,7 @@
 [← Manual index](index.md) · *WebAssembly proposal: fixed-width 128-bit SIMD
 (part of the 2.0 spec; supported by every modern engine).*
 
-The full 236-instruction `v128` surface, expressed through wasmemit's
+The full 236-instruction `v128` surface, expressed through wasmloom's
 [signedness-first discipline](types.md) extended lane-wise. All SIMD types
 share one 128-bit storage; each is a *view* declaring lane width and
 signedness.
@@ -21,7 +21,7 @@ zero-extends, and the widening families follow the namespace
 (`u32x4.extend_low` takes a `u16x8`).
 
 ```js
-import { Module, s32, s32x4 } from "wasmemit";
+import { Module, s32, s32x4 } from "wasmloom";
 
 const mod = new Module();
 const mem = mod.memory({ min: 1 }).export("mem");
@@ -54,7 +54,7 @@ data nor conditions:
 - Masks compose with `and`/`or`/`xor`/`not`/`andnot`.
 
 ```js
-import { Module, f32, bool, f32x4, m32x4 } from "wasmemit";
+import { Module, f32, bool, f32x4, m32x4 } from "wasmloom";
 
 const mod = new Module();
 mod.function([f32, f32], [bool]).export("allInRange").body((lo, hi, $) => {
@@ -109,7 +109,7 @@ All ten data namespaces load and store through
 
 `v128` values cannot cross into JavaScript — exported/imported signatures
 must stay scalar. Move vectors through [linear memory](memory.md) (that's
-also how wasmemit's own 9k-case SIMD sweep verifies every instruction).
+also how wasmloom's own 9k-case SIMD sweep verifies every instruction).
 [Variables](expressions.md#variables) and
 [module variables](module.md#module-variables-wasm-globals) hold vectors
 fine (`mod.variable(s32x4, [1, 2, 3, 4])`).

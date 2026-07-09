@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 // The manual's examples are executable documentation: every fenced ```js
-// block in docs/*.md that imports from "wasmemit" is a complete program and
+// block in docs/*.md that imports from "wasmloom" is a complete program and
 // runs here (against the local source). Examples signal failure by throwing —
 // they contain their own assertions. Fragments simply don't import.
 
@@ -15,7 +15,7 @@ const srcUrl = new URL("../src/index.js", import.meta.url).href;
 function examplesOf(file) {
   const text = readFileSync(docsDir + file, "utf8");
   const blocks = [...text.matchAll(/```js\n([\s\S]*?)```/g)].map((m) => m[1]);
-  return blocks.filter((b) => b.includes('from "wasmemit"'));
+  return blocks.filter((b) => b.includes('from "wasmloom"'));
 }
 
 const pages = readdirSync(docsDir).filter((f) => f.endsWith(".md"));
@@ -26,7 +26,7 @@ for (const page of pages) {
   total += examples.length;
   test(`docs examples run: ${page} (${examples.length})`, () => {
     for (const [i, source] of examples.entries()) {
-      const code = source.replaceAll('"wasmemit"', JSON.stringify(srcUrl));
+      const code = source.replaceAll('"wasmloom"', JSON.stringify(srcUrl));
       try {
         execFileSync(process.execPath, ["--input-type=module", "-e", code], {
           stdio: ["ignore", "pipe", "pipe"],

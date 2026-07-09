@@ -8,7 +8,7 @@
 later, which makes forward declarations and mutual recursion natural:
 
 ```js
-import { Module, s32, bool } from "wasmemit";
+import { Module, s32, bool } from "wasmloom";
 
 const mod = new Module();
 const isOdd = mod.function([s32], [bool]).export("isOdd");
@@ -53,7 +53,7 @@ return shape follows the result count:
   variable handles for destructuring:
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 const divmod = mod.function([s32, s32], [s32, s32]).body((a, b, $) => {

@@ -39,7 +39,7 @@ time and traps on mismatch or null. (Typed-reference tables
 [skip that check](typed-funcref.md#typed-tables).)
 
 ```js
-import { Module, s32, funcref } from "wasmemit";
+import { Module, s32, funcref } from "wasmloom";
 
 const mod = new Module();
 const sig = mod.funcType([s32], [s32]);

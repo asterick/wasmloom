@@ -1,6 +1,6 @@
-# wasmemit Reference Manual
+# wasmloom Reference Manual
 
-wasmemit generates WebAssembly binaries from JavaScript expression builders —
+wasmloom weaves WebAssembly binaries from JavaScript expression builders —
 `mod.emit()` returns a `Uint8Array` ready for `WebAssembly.instantiate`, with
 no external toolchain and zero dependencies. Every builder call is
 type-checked eagerly at the call site, and the emitted bytes are verified
@@ -8,7 +8,7 @@ against V8 by 200+ tests including differential fuzzers and ~25k-case
 per-instruction sweeps.
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 mod.function([s32], [s32]).export("square").body((x, $) => {
@@ -26,7 +26,7 @@ if (instance.exports.square(9) !== 81) throw new Error("unexpected");
 - [Getting started](getting-started.md) — install, first module, running the output.
 - [The Module](module.md) — `Module` options (`debug`, `permissive`, `tailCalls`),
   module variables, imports/exports, `emit()`.
-- [Errors and debugging](errors.md) — eager validation, `WasmEmitError`, `debug` traces.
+- [Errors and debugging](errors.md) — eager validation, `WasmLoomError`, `debug` traces.
 
 **Core reference (WebAssembly 2.0)**
 
@@ -60,7 +60,7 @@ if (instance.exports.square(9) !== 81) throw new Error("unexpected");
 
 ## Feature and engine matrix
 
-wasmemit itself runs anywhere with ES modules (Node ≥ 18). What the *emitted
+wasmloom itself runs anywhere with ES modules (Node ≥ 18). What the *emitted
 module* requires depends on the features it uses:
 
 | Feature | Spec status | Needs (approx.) | Manual section |

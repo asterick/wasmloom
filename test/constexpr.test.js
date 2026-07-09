@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, s64, u64, funcref, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, s64, u64, funcref, WasmLoomError } from "../src/index.js";
 
 // Extended constant expressions (wasm 3.0): add/sub/mul on the integer
 // namespaces, built OUTSIDE a body, compose into module-variable inits and
 // data/element offsets. Inside a body the same constructors stay runtime ops.
 
-const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmEmitError && re.test(e.message));
+const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmLoomError && re.test(e.message));
 
 async function instantiate(mod, imports = {}) {
   const bytes = mod.emit();

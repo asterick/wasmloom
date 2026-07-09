@@ -2,14 +2,14 @@
 
 [← Manual index](index.md)
 
-wasmemit validates **eagerly**: the builder call that creates a mistake is
-the one that throws, as a `WasmEmitError` naming the operation, what it
+wasmloom validates **eagerly**: the builder call that creates a mistake is
+the one that throws, as a `WasmLoomError` naming the operation, what it
 expected, and what it got. There is no separate "validate" step to run and no
 invalid intermediate state to debug — if your builder code finished running,
 the module structure is sound.
 
 ```js
-import { Module, s32, f64, WasmEmitError } from "wasmemit";
+import { Module, s32, f64, WasmLoomError } from "wasmloom";
 
 const mod = new Module();
 let caught = null;
@@ -21,7 +21,7 @@ mod.function([s32], [s32]).body((x, $) => {
   }
   $.return(x);
 });
-if (!(caught instanceof WasmEmitError)) throw new Error("expected an eager error");
+if (!(caught instanceof WasmLoomError)) throw new Error("expected an eager error");
 if (!/expected s32, got f64/.test(caught.message)) throw new Error(caught.message);
 ```
 
@@ -53,10 +53,10 @@ changes the output bytes.
 
 ## Runtime traps
 
-Traps are the engine's, not wasmemit's: division by zero, out-of-bounds
+Traps are the engine's, not wasmloom's: division by zero, out-of-bounds
 access, `call_indirect` signature mismatches,
 [null function references](typed-funcref.md#promotion), `$.unreachable()`.
 They surface as `WebAssembly.RuntimeError` when the export is called. What
-wasmemit guarantees is that its *output validates* — the emitted bytes are
+wasmloom guarantees is that its *output validates* — the emitted bytes are
 checked against V8 across the entire test suite, including every example in
 this manual.

@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, f64, bool, funcref, externref, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, f64, bool, funcref, externref, WasmLoomError } from "../src/index.js";
 
-const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmEmitError && re.test(e.message));
+const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmLoomError && re.test(e.message));
 
 async function instantiate(mod, imports = {}) {
   const bytes = mod.emit();

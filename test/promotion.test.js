@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, u32, s64, u64, f32, f64, bool, WasmEmitError } from "../src/index.js";
+import { Module, s32, u32, s64, u64, f32, f64, bool, WasmLoomError } from "../src/index.js";
 
 // Safe value-exact promotion is DEFAULT behavior — the consuming op's
 // namespace explicitly names the target, and only lossless lifts exist, so
 // nothing here uses any flag.
 
-const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmEmitError && re.test(e.message));
+const throws = (fn, re) => assert.throws(fn, (e) => e instanceof WasmLoomError && re.test(e.message));
 
 async function instantiate(mod, imports = {}) {
   const bytes = mod.emit();

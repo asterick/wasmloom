@@ -7,7 +7,7 @@
 entity space (imports always index before definitions, per the wasm spec).
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module({ debug: true });
 const answer = mod.variable(s32, 42).immutable().export("answer");
@@ -66,7 +66,7 @@ Initializers follow wasm's constant-expression grammar:
   [Extended constant expressions](extended-const.md).
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 const base = mod.variable(s32).import("env", "base").immutable();

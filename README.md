@@ -1,8 +1,8 @@
-# wasmemit
+# wasmloom
 
-A JavaScript module for generating WebAssembly modules using expression builders.
-Emits valid `.wasm` binaries directly, with no external toolchain and zero
-dependencies. Ships generated TypeScript declarations.
+Weave WebAssembly binaries from JavaScript expression builders. Emits valid
+`.wasm` directly — no external toolchain, zero dependencies — with strict,
+eagerly-checked type discipline. Ships generated TypeScript declarations.
 
 **[Reference manual](docs/index.md)** — a multipage manual with tested
 examples, one section per WebAssembly proposal (also served via GitHub
@@ -11,7 +11,7 @@ Pages). [DESIGN.md](DESIGN.md) is the design contract.
 ## Example
 
 ```js
-import { Module, s32 } from "wasmemit";
+import { Module, s32 } from "wasmloom";
 
 const mod = new Module();
 const log = mod.function([s32], []).import("env", "log");

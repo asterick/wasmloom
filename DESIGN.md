@@ -1,4 +1,4 @@
-# wasmemit — Design
+# wasmloom — Design
 
 Generate WebAssembly modules from JavaScript using expression builders. No external
 toolchain; emits binary `.wasm` bytes directly.
@@ -40,7 +40,7 @@ toolchain; emits binary `.wasm` bytes directly.
 ## Public API sketch
 
 ```js
-import { Module, s32, u32, s64, u64, f32, f64 } from "wasmemit";
+import { Module, s32, u32, s64, u64, f32, f64 } from "wasmloom";
 
 const mod = new Module();
 
@@ -277,7 +277,7 @@ scalar discipline extends lane-wise. Signedness lives in the namespace
 produce masks, and `cast` retypes any v128 view into any other for free.
 
 ```js
-import { s32x4, f32x4, m32x4, u8x16 } from "wasmemit";
+import { s32x4, f32x4, m32x4, u8x16 } from "wasmloom";
 
 const v = s32x4.load(mem, addr);                  // lane types load/store directly
 const clamped = s32x4.bitselect(limit, v, s32x4.gt(v, limit)); // mask-typed select
