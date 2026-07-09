@@ -127,8 +127,13 @@ done. Remaining items are pinned:
 
 ## Working conventions
 
-- Repo: github.com/asterick/wasmemit (private), branch `main`, commit
-  style: imperative summary + body, Claude co-author trailer.
+- Repo: github.com/asterick/wasmemit (private). Commit style: imperative
+  summary + body, Claude co-author trailer.
+- **main is protected — never commit to it directly.** All work goes on a
+  branch and merges via PR; merging requires an approving review from a repo
+  administrator (CODEOWNERS: @asterick) AND green CI (test 22.x/24.x +
+  types). Rules apply to admins too. Branch, push, `gh pr create`, and hand
+  the PR to Bryon for approval.
 - `index.d.ts` is GENERATED (`npm run types`, scripts/generate-dts.js) from
   `VENEER_OPS` + a hand-maintained skeleton; `test/dts.test.js` fails when
   stale. After touching the veneer, regenerate and commit both. Typecheck
