@@ -2,7 +2,7 @@
 
 [← Manual index](index.md) · *WebAssembly proposal: tail calls (wasm 3.0).
 Emitted by default whenever a return is in tail position — opt out with
-[`tailCalls: false`](module.md#tailcalls). Needs Node ≥ 20 / Chrome ≥ 112.*
+[`tailCalls: false`](module.md#tailcalls). Needs Node ≥ 20 / Chrome ≥ 112 / Firefox ≥ 121.*
 
 Tail calls are **implicit**: returning a call's results directly emits
 `return_call` (or `return_call_indirect` / `return_call_ref`), replacing the

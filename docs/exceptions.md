@@ -1,7 +1,7 @@
 # Exception handling
 
 [← Manual index](index.md) · *WebAssembly proposal: exception handling with
-exnref (wasm 3.0). Emitted modules need Node ≥ 24 / Chrome ≥ 131 — only when
+exnref (wasm 3.0). Emitted modules need Node ≥ 24 / Chrome ≥ 131 / Firefox ≥ 131 — only when
 a module uses tags or try.*
 
 Typed, zero-cost-until-thrown exceptions: **tags** declare an exception's

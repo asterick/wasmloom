@@ -72,12 +72,12 @@ module* requires depends on the features it uses:
 | Feature | Spec status | Needs (approx.) | Manual section |
 |---|---|---|---|
 | Core + SIMD | WebAssembly 2.0 | any modern engine | core sections, [SIMD](simd.md) |
-| Multiple memories | wasm 3.0 | Node ≥ 22, Chrome ≥ 120 | [Multiple memories](multi-memory.md) |
-| Tail calls | wasm 3.0 | Node ≥ 20, Chrome ≥ 112 | [Tail calls](tail-calls.md) — emitted by default; [opt out](module.md#tailcalls) |
-| Extended const | wasm 3.0 | Node ≥ 20, Chrome ≥ 114 | [Extended const](extended-const.md) — only if used |
-| Typed func refs | wasm 3.0 | Node ≥ 22, Chrome ≥ 119 | [Typed function references](typed-funcref.md) — only if used |
-| Exceptions | wasm 3.0 | Node ≥ 24, Chrome ≥ 131 | [Exception handling](exceptions.md) — only if used |
-| GC | wasm 3.0 | Node ≥ 22, Chrome ≥ 119 | [Garbage collection](gc.md) — only if used |
+| Multiple memories | wasm 3.0 | Node ≥ 22, Chrome ≥ 120, Firefox ≥ 125 | [Multiple memories](multi-memory.md) |
+| Tail calls | wasm 3.0 | Node ≥ 20, Chrome ≥ 112, Firefox ≥ 121 | [Tail calls](tail-calls.md) — emitted by default; [opt out](module.md#tailcalls) |
+| Extended const | wasm 3.0 | Node ≥ 20, Chrome ≥ 114, Firefox ≥ 112 | [Extended const](extended-const.md) — only if used |
+| Typed func refs | wasm 3.0 | Node ≥ 22, Chrome ≥ 119, Firefox ≥ 120 | [Typed function references](typed-funcref.md) — only if used |
+| Exceptions | wasm 3.0 | Node ≥ 24, Chrome ≥ 131, Firefox ≥ 131 | [Exception handling](exceptions.md) — only if used |
+| GC | wasm 3.0 | Node ≥ 22, Chrome ≥ 119, Firefox ≥ 120 | [Garbage collection](gc.md) — only if used |
 | Threads/atomics | phase 4 | any modern engine | [Threads and atomics](threads.md) — only if used |
 
 Every complete example in this manual is executed by the test suite

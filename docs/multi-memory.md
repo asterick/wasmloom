@@ -1,7 +1,7 @@
 # Multiple memories
 
 [← Manual index](index.md) · *WebAssembly proposal: multi-memory (wasm 3.0).
-Emitted modules need Node ≥ 22 / Chrome ≥ 120 — only when a module actually
+Emitted modules need Node ≥ 22 / Chrome ≥ 120 / Firefox ≥ 125 — only when a module actually
 declares more than one memory.*
 
 Declare as many memories as you like — because every wasmloom
