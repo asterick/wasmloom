@@ -1,6 +1,6 @@
 import { fail } from "./errors.js";
 import { checkValType, exnref } from "./types.js";
-import { resolveInt32, resolveBool, defaultInit } from "./expr.js";
+import { resolveInt32, resolveBool, defaultInit, atomicFence } from "./expr.js";
 import { isRef } from "./types.js";
 import { Block, Label, successors } from "./cfg.js";
 import { makeNode, resolveOperand, describeNode } from "./node.js";
@@ -435,6 +435,12 @@ function makeDollar(b) {
     drop(value) {
       const v = resolveOperand(value, null, "$.drop");
       makeNode("drop", { operands: [v] }, { anchor: true });
+    },
+
+    /** atomic.fence — order memory effects without touching memory. */
+    fence() {
+      b.flush();
+      atomicFence();
     },
 
     unreachable() {

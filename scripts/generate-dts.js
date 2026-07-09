@@ -55,6 +55,12 @@ const ret = (results) => (results.length ? expr(results[0]) : "void");
 function memberFor(v) {
   const params = v.params;
   const argOf = (p, i) => `${ARG[i]}: ${v.any32?.[i] ? "I32ish" : into(p)}`;
+  if (v.mem === "rmw") {
+    return `${v.name}(mem: Memory, addr: I32ish, value: ${into(params[1])}, opts?: { offset?: number }): ${ret(v.results)};`;
+  }
+  if (v.mem === "rmw2") {
+    return `${v.name}(mem: Memory, addr: I32ish, a: ${into(params[1])}, b: ${into(params[2])}, opts?: { offset?: number }): ${ret(v.results)};`;
+  }
   if (v.mem === "load" || v.mem === "store") {
     if (v.laneCount) {
       const r = v.mem === "load" ? ret(v.results) : "void";
@@ -179,6 +185,8 @@ export function generateDts() {
   push("  try(body: (ctx: Ctx<R>) => void): TryChain<R>;");
   push("  drop(value: Expr): void;");
   push("  unreachable(): void;");
+  push("  /** atomic.fence — order memory effects without touching memory. */");
+  push("  fence(): void;");
   push("  if(cond: Into<\"bool\">, body: (ctx: Ctx<R>) => void): IfChain<R>;");
   push("  while(cond: Into<\"bool\">, body: (ctx: Ctx<R>) => void): void;");
   push("}");
@@ -295,7 +303,7 @@ export function generateDts() {
   push("  test(x: Expr<AnyHier>): Expr<\"bool\">;");
   push("}");
   push("");
-  push("export interface Limits { min: number; max?: number }");
+  push("export interface Limits { min: number; max?: number; shared?: boolean }");
   push("");
   push("export interface Memory {");
   push("  size(): Expr<\"u32\">;");
@@ -303,6 +311,11 @@ export function generateDts() {
   push("  fill(dst: I32ish, value: I32ish, len: I32ish): void;");
   push("  copy(dst: I32ish, src: I32ish, len: I32ish, opts?: { from?: Memory }): void;");
   push("  init(seg: DataSegment, dst: I32ish, src: I32ish, len: I32ish): void;");
+  push("  /** Wake up to count waiters at addr; u32 woken count. */");
+  push("  notify(addr: I32ish, count: I32ish): Expr<\"u32\">;");
+  push("  /** Block while addr holds expected. u32: 0 woken, 1 mismatch, 2 timeout. */");
+  push("  wait32(addr: I32ish, expected: I32ish, timeoutNs: Into<\"s64\">): Expr<\"u32\">;");
+  push("  wait64(addr: I32ish, expected: Into<\"s64\">, timeoutNs: Into<\"s64\">): Expr<\"u32\">;");
   push("  import(module: string, name: string): this;");
   push("  export(name: string): this;");
   push("  /** Debug name for the name section (overrides export/import-derived). */");

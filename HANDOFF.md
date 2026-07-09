@@ -9,7 +9,7 @@ builders — no external toolchain, `mod.emit()` → `Uint8Array`. The whole
 Wasm 2.0 surface is implemented, **including fixed-width SIMD**, plus
 multiple memories, extended constant expressions, tail calls, typed
 function references, exception handling, and garbage collection from
-wasm 3.0. 269 tests, all passing (`npm test`,
+wasm 3.0, plus threads/atomics. 278 tests, all passing (`npm test`,
 Node ≥ 18 — the wasm 3.0 features need a newer engine, Node ≥ 22 in
 practice; zero dependencies).
 
@@ -110,6 +110,10 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
 - `memory-sweep` — all load/store variants vs DataView; bulk-op semantics.
 - `simd` — behavioral: masks end-to-end, shape-barrier errors, casts,
   v128 variables/globals, lane memory ops, shuffle/swizzle.
+- `atomics` — shared memories (SAB), old-value RMW vs JS Atomics,
+  cmpxchg, sized zero-extension + alignment traps, wait/notify codes,
+  real worker_threads contention (2×200k increments, exact) and a
+  wasm-wait woken by wasm-notify.
 - `gc` — structs/arrays end-to-end: named fields, recursion (shared rec
   group = nominal distinctness — sibling same-shape casts stay false),
   extends+casts+test, packed wrap/signedness, newData/initData, i31,

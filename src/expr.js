@@ -196,6 +196,9 @@ function checkMemArgs(mem, opts, entry, what) {
   const b = requireBuilder(what);
   if (mem?.handleKind !== "memory") fail(`${what}: first argument must be a memory handle`);
   if (mem.module !== b.module) fail(`${what}: memory belongs to a different module`);
+  if (entry.atomic && opts.align !== undefined) {
+    fail(`${what}: atomic accesses require natural alignment — the align option is not accepted`);
+  }
   const align = opts.align ?? entry.size;
   if (!Number.isInteger(align) || align <= 0 || (align & (align - 1)) !== 0 || align > entry.size) {
     fail(`${what}: align must be a power of two ≤ ${entry.size} (bytes), got ${align}`);
@@ -208,6 +211,23 @@ function checkMemArgs(mem, opts, entry, what) {
 }
 
 function makeMemConstructor(entry, params, results, display) {
+  if (entry.mem === "rmw") {
+    return function (mem, addr, value, opts = {}) {
+      const memarg = checkMemArgs(mem, opts, entry, display);
+      const a = resolveInt32(addr, `${display} address`);
+      const v = resolveOperand(value, params[1], `${display} value`);
+      return makeNode("op", { results, entry, operands: [a, v], mem, memarg, display });
+    };
+  }
+  if (entry.mem === "rmw2") {
+    return function (mem, addr, x, y, opts = {}) {
+      const memarg = checkMemArgs(mem, opts, entry, display);
+      const a = resolveInt32(addr, `${display} address`);
+      const vx = resolveOperand(x, params[1], `${display} operand 2`);
+      const vy = resolveOperand(y, params[2], `${display} operand 3`);
+      return makeNode("op", { results, entry, operands: [a, vx, vy], mem, memarg, display });
+    };
+  }
   if (entry.mem === "load") {
     return function (mem, addr, opts = {}) {
       const memarg = checkMemArgs(mem, opts, entry, display);
@@ -260,6 +280,27 @@ function buildIntNamespace(T, st, signed) {
   if (st === "i64") {
     defOp(T, "load32", e(`load32${sfx}`), [ANY32], [T]);
     defOp(T, "store32", e("store32"), [ANY32, T], []);
+  }
+
+  // Atomics (sequentially consistent; natural alignment enforced). Full-width
+  // ops are sign-agnostic and live on both namespaces; sized variants are
+  // zero-extending and unsigned-only, like the sized-load precedent.
+  const widths = st === "i64" ? [8, 16, 32] : [8, 16];
+  defOp(T, "atomic_load", e("atomic.load"), [ANY32], [T]);
+  defOp(T, "atomic_store", e("atomic.store"), [ANY32, T], []);
+  for (const w of widths) defOp(T, `atomic_store${w}`, e(`atomic.store${w}`), [ANY32, T], []);
+  for (const name of ["add", "sub", "and", "or", "xor", "xchg"]) {
+    defOp(T, `atomic_${name}`, e(`atomic.rmw.${name}`), [ANY32, T], [T]);
+  }
+  defOp(T, "atomic_cmpxchg", e("atomic.rmw.cmpxchg"), [ANY32, T, T], [T]);
+  if (!signed) {
+    for (const w of widths) {
+      defOp(T, `atomic_load${w}`, e(`atomic.load${w}_u`), [ANY32], [T]);
+      for (const name of ["add", "sub", "and", "or", "xor", "xchg"]) {
+        defOp(T, `atomic_${name}${w}`, e(`atomic.rmw${w}.${name}_u`), [ANY32, T], [T]);
+      }
+      defOp(T, `atomic_cmpxchg${w}`, e(`atomic.rmw${w}.cmpxchg_u`), [ANY32, T, T], [T]);
+    }
   }
 
   // Conversions (operand-driven)
@@ -776,6 +817,11 @@ function checkSegHandle(seg, module, what) {
 
 const bulk = (name) => entryOf(`memory.${name}`);
 
+/** atomic.fence — a bare memory-ordering statement ($.fence delegates here). */
+export function atomicFence() {
+  makeNode("op", { results: [], entry: entryOf("atomic.fence"), operands: [], display: "$.fence" }, { anchor: true });
+}
+
 /** Implementations behind MemoryHandle/DataSegment methods (module.js delegates here). */
 export const MEMORY_OPS = {
   size(mem) {
@@ -827,6 +873,27 @@ export const MEMORY_OPS = {
       { anchor: true },
     );
   },
+  notify(mem, addr, count) {
+    checkMemHandle(mem, "mem.notify()");
+    const entry = entryOf("memory.atomic.notify");
+    const operands = [resolveInt32(addr, "mem.notify() address"), resolveInt32(count, "mem.notify() count")];
+    return makeNode("op", { results: [u32], entry, operands, mem, memarg: { align: 2, offset: 0 }, display: "mem.notify()" });
+  },
+  wait(mem, name, addr, expected, timeout) {
+    const what = `mem.${name}()`;
+    checkMemHandle(mem, what);
+    const entry = entryOf(`memory.atomic.${name}`);
+    const operands = [
+      resolveInt32(addr, `${what} address`),
+      name === "wait64"
+        ? resolveOperand(expected, s64, `${what} expected`)
+        : resolveInt32(expected, `${what} expected`),
+      resolveOperand(timeout, s64, `${what} timeout (nanoseconds; negative waits forever)`),
+    ];
+    const memarg = { align: name === "wait64" ? 3 : 2, offset: 0 };
+    return makeNode("op", { results: [u32], entry, operands, mem, memarg, display: what });
+  },
+
   dropData(seg) {
     const b = requireBuilder("seg.drop()");
     checkSegHandle(seg, b.module, "seg.drop()");
@@ -937,6 +1004,10 @@ for (const [ns, name, params, results] of [
   ["memory", "fill", [u32, u32, u32], []],
   ["memory", "copy", [u32, u32, u32], []],
   ["memory", "init", [u32, u32, u32], []],
+  ["memory", "atomic.notify", [u32, u32], [u32]],
+  ["atomic", "fence", [], []],
+  ["memory", "atomic.wait32", [u32, s32, s64], [u32]],
+  ["memory", "atomic.wait64", [u32, s64, s64], [u32]],
   ["data", "drop", [], []],
   ["table", "get", [u32], [funcref]],
   ["table", "set", [u32, funcref], []],
