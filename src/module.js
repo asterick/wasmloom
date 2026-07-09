@@ -5,7 +5,7 @@ import { makeNode, resolveOperand, Node } from "./node.js";
 import { Variable } from "./variable.js";
 import { FunctionBuilder } from "./builder.js";
 import { encodeModule } from "./encode/encoder.js";
-import { MEMORY_OPS, TABLE_OPS, promoteConst, defaultInit, resolveInt32 } from "./expr.js";
+import { MEMORY_OPS, TABLE_OPS, promoteConst, defaultInit, resolveInt32, forEachConstRef } from "./expr.js";
 import { funcref, externref, isRef, isVec } from "./types.js";
 
 /** Handle for a declared function. Declare first; attach `.body()` or `.import()` later. */
@@ -288,7 +288,7 @@ export class ElemSegment {
     if (table.elemType !== funcref) {
       fail(".at(): element segments hold funcref — the table must be funcref-typed");
     }
-    this.active = { table, offset: resolveDataOffset(offset) };
+    this.active = { table, offset: resolveDataOffset(this.module, offset) };
     return this;
   }
 
@@ -317,7 +317,7 @@ export class DataSegment {
     if (mem?.handleKind !== "memory" || mem.module !== this.module) {
       fail(".at(): expected a memory handle from this module");
     }
-    this.active = { mem, offset: resolveDataOffset(offset) };
+    this.active = { mem, offset: resolveDataOffset(this.module, offset) };
     return this;
   }
 
@@ -327,7 +327,7 @@ export class DataSegment {
   }
 }
 
-function resolveDataOffset(offset) {
+function resolveDataOffset(module, offset) {
   if (typeof offset === "number") {
     if (!Number.isInteger(offset) || offset < 0 || offset > 0xffffffff) {
       fail(".at(): offset must be an integer in [0, 2^32)");
@@ -337,10 +337,16 @@ function resolveDataOffset(offset) {
   if (offset instanceof Node && offset.kind === "const" && offset.type.wasmType.name === "i32") {
     return { kind: "const", node: offset };
   }
-  if (offset?.handleKind === "variable" && offset.scope === "module" && offset.type.wasmType.name === "i32") {
-    return { kind: "global", variable: offset }; // must be imported immutable — checked at emit
+  if (offset instanceof Node && offset.kind === "constop" && offset.type.wasmType.name === "i32") {
+    forEachConstRef(offset, (ref) => {
+      if (ref.module !== module) fail(".at(): offset expression reads a variable from a different module");
+    });
+    return { kind: "constexpr", node: offset };
   }
-  fail(".at(): offset must be an integer, an s32/u32 const, or an imported immutable module variable");
+  if (offset?.handleKind === "variable" && offset.scope === "module" && offset.type.wasmType.name === "i32") {
+    return { kind: "global", variable: offset }; // must be immutable — checked at emit
+  }
+  fail(".at(): offset must be an integer, an s32/u32 const, constant add/sub/mul, or an immutable module variable");
 }
 
 function checkLimits(limits, what) {
@@ -456,7 +462,7 @@ export class Module {
   variable(type, init) {
     checkValType(type, "mod.variable");
     const initExplicit = init !== undefined;
-    const resolved = resolveModuleInit(type, init);
+    const resolved = resolveModuleInit(this, type, init);
     const handle = new Variable("module", type, { module: this, init: resolved, initExplicit });
     this.variables.push(handle);
     return handle;
@@ -515,7 +521,7 @@ export class Module {
  * grammar: a JS value, a t.const node, or an (imported immutable) module
  * variable handle. Checked further at emit.
  */
-function resolveModuleInit(type, init) {
+function resolveModuleInit(module, type, init) {
   if (init === undefined) return { kind: "const", node: defaultInit(type) };
   if (init === null && isRef(type)) return { kind: "const", node: type.null() };
   if (typeof init === "number" || typeof init === "bigint" || typeof init === "boolean") {
@@ -529,8 +535,15 @@ function resolveModuleInit(type, init) {
       if (init.type !== type) fail(`mod.variable init: expected ${type.name}, got ${init.type.name}`);
       return { kind: "const", node: init };
     }
+    if (init.kind === "constop") {
+      if (init.type !== type) fail(`mod.variable init: expected ${type.name}, got ${init.type.name}`);
+      forEachConstRef(init, (ref) => {
+        if (ref.module !== module) fail("mod.variable init: expression reads a variable from a different module");
+      });
+      return { kind: "constexpr", node: init };
+    }
     if (init.kind !== "const") {
-      fail(`mod.variable init: must be a constant expression (${type.name}.const, or an imported immutable variable)`);
+      fail(`mod.variable init: must be a constant expression (${type.name}.const, constant add/sub/mul, or an immutable module variable)`);
     }
     if (init.type !== type) {
       // Constant promotion happens at build time — the result is still a t.const.

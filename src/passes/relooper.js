@@ -97,6 +97,10 @@ export function reloop(builder, cfg, code) {
     switch (t.kind) {
       case "return":
         return [{ op: "return" }];
+      case "returnCall":
+        return [{ op: "return_call", fn: t.func }];
+      case "returnCallIndirect":
+        return [{ op: "return_call_indirect", type: t.funcType, table: t.table }];
       case "unreachable":
         return [{ op: "unreachable" }];
       case "jump":

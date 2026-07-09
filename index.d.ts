@@ -87,6 +87,10 @@ export interface Ctx<R extends readonly WasmType[] = WasmType[]> {
   gotoIf(cond: Into<"bool">, target: Label): void;
   switch(index: I32ish, targets: readonly Label[], defaultTarget: Label): void;
   return(...values: IntoArgs<R>): void;
+  /** Tail call — the callee's results must exactly match this function's. */
+  returnCall<CP extends readonly WasmType[]>(fn: Func<CP, R>, ...args: IntoArgs<CP>): void;
+  returnCall<CP extends readonly WasmType[]>(
+    tbl: Table<"funcref">, type: FuncType<CP, R>, index: I32ish, ...args: IntoArgs<CP>): void;
   drop(value: Expr): void;
   unreachable(): void;
   if(cond: Into<"bool">, body: (ctx: Ctx<R>) => void): IfChain<R>;

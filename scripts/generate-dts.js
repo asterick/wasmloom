@@ -146,6 +146,10 @@ export function generateDts() {
   push("  gotoIf(cond: Into<\"bool\">, target: Label): void;");
   push("  switch(index: I32ish, targets: readonly Label[], defaultTarget: Label): void;");
   push("  return(...values: IntoArgs<R>): void;");
+  push("  /** Tail call — the callee's results must exactly match this function's. */");
+  push("  returnCall<CP extends readonly WasmType[]>(fn: Func<CP, R>, ...args: IntoArgs<CP>): void;");
+  push("  returnCall<CP extends readonly WasmType[]>(");
+  push("    tbl: Table<\"funcref\">, type: FuncType<CP, R>, index: I32ish, ...args: IntoArgs<CP>): void;");
   push("  drop(value: Expr): void;");
   push("  unreachable(): void;");
   push("  if(cond: Into<\"bool\">, body: (ctx: Ctx<R>) => void): IfChain<R>;");

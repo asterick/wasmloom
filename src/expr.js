@@ -5,7 +5,7 @@ import {
   s8x16, u8x16, s16x8, u16x8, s32x4, u32x4, s64x2, u64x2, f32x4, f64x2, m8x16, m16x8, m32x4, m64x2,
 } from "./types.js";
 import { makeNode, resolveOperand, setCoercion } from "./node.js";
-import { requireBuilder } from "./context.js";
+import { requireBuilder, currentBuilder } from "./context.js";
 
 // Signedness lives in the public type (s32/u32/s64/u64); the optable stays
 // spec-shaped (i32.div_s, …). This module maps each public constructor to the
@@ -296,6 +296,53 @@ buildIntNamespace(s32, "i32", true);
 buildIntNamespace(u32, "i32", false);
 buildIntNamespace(s64, "i64", true);
 buildIntNamespace(u64, "i64", false);
+
+// --- extended constant expressions (wasm 3.0) ----------------------------------
+// Outside any function body, add/sub/mul on the integer namespaces build
+// constant-expression trees: operands are consts, immutable module variables,
+// or other constant expressions — usable as module-variable inits and
+// data/element offsets. Inside a body the same constructors are ordinary
+// runtime ops (one concept, context decides).
+
+function resolveConstOperand(x, T, what) {
+  if (x?.handleKind === "variable" && x.scope === "module") {
+    if (x.type !== T) fail(`${what}: expected ${T.name}, got ${x.type.name}`);
+    return makeNode("globalref", { type: T, results: [T], variable: x });
+  }
+  if (x && (x.kind === "constop" || x.kind === "const")) {
+    if (x.type !== T) {
+      const lifted = x.kind === "const" ? promoteConst(x, T) : null;
+      if (lifted) return lifted;
+      fail(`${what}: expected ${T.name}, got ${x.type.name}`);
+    }
+    return x;
+  }
+  fail(
+    `${what}: outside a function body this is a constant expression — operands must be ` +
+    `${T.name}.const values, immutable module variables, or other constant add/sub/mul`,
+  );
+}
+
+function defConstCapable(T, name) {
+  const runtime = T[name];
+  const entry = entryOf(`${T.wasmType.name}.${name}`);
+  T[name] = function (a, c) {
+    if (currentBuilder()) return runtime(a, c);
+    const what = `${T.name}.${name}`;
+    if (arguments.length !== 2) fail(`${what}: expected 2 operand(s), got ${arguments.length}`);
+    const operands = [a, c].map((x, i) => resolveConstOperand(x, T, `${what} operand ${i + 1}`));
+    return makeNode("constop", { type: T, results: [T], entry, operands });
+  };
+}
+for (const T of [s32, u32, s64, u64]) {
+  for (const name of ["add", "sub", "mul"]) defConstCapable(T, name);
+}
+
+/** Walk a constant-expression tree, calling fn on every module variable it reads. */
+export function forEachConstRef(node, fn) {
+  if (node.kind === "globalref") fn(node.variable);
+  else if (node.kind === "constop") for (const o of node.operands) forEachConstRef(o, fn);
+}
 
 // --- float namespaces ------------------------------------------------------------
 

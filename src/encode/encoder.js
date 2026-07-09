@@ -8,6 +8,7 @@ import { makeReducible } from "../passes/reduce.js";
 import { computeLiveness } from "../passes/liveness.js";
 import { allocateSlots } from "../passes/slots.js";
 import { reloop } from "../passes/relooper.js";
+import { forEachConstRef } from "../expr.js";
 
 const SECTION = {
   type: 1,
@@ -54,12 +55,20 @@ export function encodeModule(module) {
     elemSegments.push({ declarative: true, items: [...module.refFunctions], active: null });
   }
   elemSegments.forEach((seg, i) => (seg.index = i));
+
+  // Constant expressions may read any immutable module variable (wasm 3.0:
+  // imported or previously declared); mutability is an emit-time fact because
+  // .immutable() chains after declaration.
+  const offsetRefs = (offset) => {
+    const refs = [];
+    if (offset.kind === "global") refs.push(offset.variable);
+    else if (offset.kind === "constexpr") forEachConstRef(offset.node, (r) => refs.push(r));
+    return refs;
+  };
   for (const seg of elemSegments) {
-    if (seg.active?.offset.kind === "global") {
-      const ref = seg.active.offset.variable;
-      if (!ref.importInfo || ref.mutable) {
-        fail(".at(): an offset variable must be an imported immutable module variable");
-      }
+    if (!seg.active) continue;
+    for (const ref of offsetRefs(seg.active.offset)) {
+      if (ref.mutable) fail(".at(): an offset may only read immutable module variables");
     }
   }
 
@@ -69,11 +78,9 @@ export function encodeModule(module) {
 
   module.dataSegments.forEach((seg, i) => (seg.index = i));
   for (const seg of module.dataSegments) {
-    if (seg.active?.offset.kind === "global") {
-      const ref = seg.active.offset.variable;
-      if (!ref.importInfo || ref.mutable) {
-        fail(".at(): an offset variable must be an imported immutable module variable");
-      }
+    if (!seg.active) continue;
+    for (const ref of offsetRefs(seg.active.offset)) {
+      if (ref.mutable) fail(".at(): an offset may only read immutable module variables");
     }
   }
 
@@ -81,10 +88,15 @@ export function encodeModule(module) {
     if (!g.mutable && g.setCount > 0) {
       fail(`module variable ${g.describe()}: immutable but written by .set()`);
     }
-    if (!g.importInfo && g.init.kind === "global") {
-      const ref = g.init.variable;
-      if (!ref.importInfo || ref.mutable) {
-        fail("mod.variable init: an initializer may only reference an imported immutable variable");
+    if (g.importInfo) continue;
+    // wasm requires init refs to precede the global being defined; declaration
+    // order guarantees it here (an init can only mention already-created
+    // handles), so only mutability needs checking.
+    const refs = g.init.kind === "global" ? [g.init.variable]
+      : g.init.kind === "constexpr" ? offsetRefs(g.init) : [];
+    for (const ref of refs) {
+      if (ref.mutable) {
+        fail("mod.variable init: an initializer may only read immutable module variables");
       }
     }
   }
@@ -171,6 +183,8 @@ export function encodeModule(module) {
       sw.u8(g.type.code).u8(g.mutable ? 1 : 0);
       if (g.init.kind === "global") {
         sw.u8(OPS.global_get).u32(g.init.variable.index);
+      } else if (g.init.kind === "constexpr") {
+        writeConstExpr(sw, g.init.node);
       } else {
         writeConst(sw, g.init.node);
       }
@@ -315,10 +329,27 @@ function writeConstOffset(s, off) {
     s.u8(OPS.i32_const).s32(signed);
   } else if (off.kind === "global") {
     s.u8(OPS.global_get).u32(off.variable.index);
+  } else if (off.kind === "constexpr") {
+    writeConstExpr(s, off.node);
   } else {
     writeConst(s, off.node);
   }
   s.u8(OPS.end);
+}
+
+/** Extended constant expression: consts, global reads, and add/sub/mul trees. */
+function writeConstExpr(s, node) {
+  switch (node.kind) {
+    case "globalref":
+      s.u8(OPS.global_get).u32(node.variable.index);
+      break;
+    case "constop":
+      for (const o of node.operands) writeConstExpr(s, o);
+      s.bytes(node.entry.op);
+      break;
+    default:
+      writeConst(s, node);
+  }
 }
 
 /** One element segment, picking the tightest encoding flavor. */
@@ -371,7 +402,8 @@ function writeBody(w, { tree, slotOf, localsDecl }) {
   // falls off the end — but when the last item is structured (if/loop/block),
   // the validator still types the fallthrough. Cap it as unreachable.
   const last = tree[tree.length - 1];
-  const diverges = last && ["return", "unreachable", "br", "br_table"].includes(last.op);
+  const diverges = last &&
+    ["return", "unreachable", "br", "br_table", "return_call", "return_call_indirect"].includes(last.op);
   if (!diverges) w.u8(OPS.unreachable);
   w.u8(OPS.end);
 }
@@ -459,6 +491,8 @@ function writeItem(w, item, slotOf) {
       break;
     case "call": w.u8(OPS.call).u32(item.fn.index); break;
     case "call_indirect": w.u8(OPS.call_indirect).u32(item.type.typeIndex).u32(item.table.index); break;
+    case "return_call": w.u8(OPS.return_call).u32(item.fn.index); break;
+    case "return_call_indirect": w.u8(OPS.return_call_indirect).u32(item.type.typeIndex).u32(item.table.index); break;
     case "reffunc": w.u8(OPS.ref_func).u32(item.fn.index); break;
     case "drop": w.u8(OPS.drop); break;
     default: fail(`internal: cannot encode item ${item.op ?? item.k}`);

@@ -52,9 +52,10 @@ export function describeNode(n) {
  */
 export function makeNode(kind, fields, opts = {}) {
   const n = new Node(kind, fields);
-  // Pure leaves (constants, ref.func) are emitted per use and may be built
-  // outside any body (they're constant expressions).
-  if (kind === "const" || kind === "reffunc") {
+  // Pure leaves and constant-expression trees (constants, ref.func, extended
+  // const add/sub/mul, global references) are emitted per use and may be
+  // built outside any body.
+  if (kind === "const" || kind === "reffunc" || kind === "constop" || kind === "globalref") {
     const b = currentBuilder();
     if (b?.module.debug) n.trace = new Error().stack;
     return n;

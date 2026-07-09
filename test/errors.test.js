@@ -126,8 +126,9 @@ test("module variable init must be a constant expression", () => {
   // may legally chain after this declaration).
   const mutable = mod.variable(s32, 1);
   mod.variable(s32, mutable);
-  throws(() => mod.emit(), /imported immutable/);
+  throws(() => mod.emit(), /immutable module variables/);
 });
+
 
 test("imported variable cannot have an initializer", () => {
   const mod = new Module();
@@ -144,8 +145,11 @@ test("cross-function expression use", () => {
   );
 });
 
-test("expressions require an active body", () => {
-  throws(() => s32.add(s32.const(1), s32.const(2)), /no active function body/);
+test("expressions require an active body (const-capable add/sub/mul excepted)", () => {
+  // add/sub/mul on integer namespaces double as extended constant expressions;
+  // everything else still demands a body.
+  throws(() => s32.div(s32.const(1), s32.const(2)), /no active function body/);
+  throws(() => s32.lt(s32.const(1), s32.const(2)), /no active function body/);
 });
 
 test("elseIf after an intervening statement", () => {

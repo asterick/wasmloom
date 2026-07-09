@@ -9,7 +9,7 @@ toolchain; emits binary `.wasm` bytes directly.
 |---|---|
 | API style | Hybrid: expression objects for values, statement context (`$`) for effects/control flow |
 | Output | Binary `.wasm` bytes (`Uint8Array`) |
-| Spec target | Wasm 2.0 baseline: multi-value, bulk memory, reference types, sign-extension, nontrapping conversions, fixed-width SIMD — plus multiple memories from wasm 3.0 |
+| Spec target | Wasm 2.0 baseline: multi-value, bulk memory, reference types, sign-extension, nontrapping conversions, fixed-width SIMD — plus multiple memories, extended constant expressions, and tail calls from wasm 3.0 |
 | Validation | Eager — type errors throw at the builder call that caused them |
 | Declarations | Handles: declare first, attach bodies later (forward decls, mutual recursion) |
 | Imports | Chained on the same declaration: `.import(module, name)` — exactly one of body/init or import |
@@ -27,6 +27,8 @@ toolchain; emits binary `.wasm` bytes directly.
 | Consts | Range-checked per namespace: `s32.const` in [-2^31, 2^31), `u32.const` in [0, 2^32), etc.; `f32.const` rounds |
 | Safe promotion | Default behavior: operands lift value-exactly into an op's namespace type (s32/u32/bool→s64, u32/bool→u64, f32/s32/u32/bool→f64, bool→s32/u32/f32) — the namespace names the target explicitly, so nothing implicit is guarded. Lossy/narrowing always errors |
 | Permissive mode | `permissive: true` (opt-in, never default in tests) — bit-level leniency within a storage width: integer conditions, mixed signedness retypes, integers in bool positions get a real ≠0 test |
+| Tail calls | `$.returnCall(fn, ...args)` and `$.returnCall(tbl, funcType, index, ...args)` — terminator statements on the `$` context; the callee's results must exactly match the caller's (eager error, and encoded in the generated types) |
+| Const expressions | `add`/`sub`/`mul` on the integer namespaces double as wasm 3.0 extended constant expressions when built outside a body — one concept, context decides. Operands: consts, immutable module variables (imported or previously declared — the handle-first API makes forward refs unconstructible), nested const ops. Usable as inits and data/element offsets, and reusable inside bodies as ordinary code |
 | SIMD lanes | Lane namespaces follow signedness: `s8x16`/`u8x16`/`s16x8`/`u16x8`/`s32x4`/`u32x4`/`s64x2`/`u64x2`/`f32x4`/`f64x2`, all views over one v128 storage. Suffix-less names select variants (`u8x16.shr` → `i8x16.shr_u`); widening/narrowing families follow the namespace (`s32x4.extend_low(s16x8)`) |
 | SIMD masks | Comparisons produce dedicated mask types (`m8x16`/`m16x8`/`m32x4`/`m64x2`) — the SIMD analog of `bool`. `bitselect` requires a shape-matched mask; `any_true`/`all_true` (→ `bool`) and `bitmask` (→ `u32`) live on masks. Masks are not data and not conditions |
 | SIMD v128 ops | Lane-agnostic instructions (bitwise, `bitselect`, plain load/store) appear on every integer lane namespace and mask — no bare `v128` type in the public API. Every v128 view retypes into any other via zero-cost `cast` (the universal bridge; there is no wasm instruction to select). Floats keep the scalar discipline: no bitwise ops without casting to an integer view |
@@ -98,6 +100,10 @@ sum.body((n, $) => {
 
 - `$.goto(label)`, `$.gotoIf(cond, label)` — unconditional/conditional jumps.
 - `$.switch(index, [l0, l1, …], defaultLabel)` — dense dispatch, lowers to `br_table`.
+- `$.returnCall(fn, ...args)` / `$.returnCall(tbl, funcType, index, ...args)` —
+  tail calls (`return_call` / `return_call_indirect`): the callee replaces this
+  frame, so deep self/mutual recursion runs in constant stack. Terminators,
+  like `$.return`; the callee's results must exactly match the caller's.
 - **Labels are function-scoped, not closure-scoped.** The sugar callbacks are
   just recording devices over a flat CFG, so `.here()` may be called inside
   any nested `$.if`/`$.while` callback of the same body — placement lands

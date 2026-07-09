@@ -164,12 +164,12 @@ test("data segment misuse errors", () => {
   void memB;
 });
 
-test("offset variable must be imported and immutable (checked at emit)", () => {
+test("offset variable must be immutable (checked at emit)", () => {
   const mod = new Module();
   const mem = mod.memory({ min: 1 });
-  const local = mod.variable(u32, 8);
+  const local = mod.variable(u32, 8); // mutable — .immutable() never chained
   mod.data(new Uint8Array([1])).at(mem, local);
-  throws(() => mod.emit(), /imported immutable/);
+  throws(() => mod.emit(), /immutable module variables/);
 });
 
 test("bulk ops from another module's handle are rejected", () => {

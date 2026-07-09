@@ -414,6 +414,8 @@ export const OPS = {
   call: 0x10,
   drop: 0x1a,
   call_indirect: 0x11,
+  return_call: 0x12,
+  return_call_indirect: 0x13,
   select_typed: 0x1c,
   ref_null: 0xd0,
   ref_func: 0xd2,

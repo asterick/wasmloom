@@ -89,9 +89,17 @@ export function linearize(builder, cfg) {
               out.push(v.scope === "module" ? { k: "gget", g: v } : { k: "get", v: v.vlocal });
               break;
             }
+            case "globalref":
+              // constant-expression tree used in a body: a plain global read
+              if (node.variable.module !== builder.module) {
+                fail(`${describeNode(node)}: variable belongs to a different module`, node);
+              }
+              out.push({ k: "gget", g: node.variable });
+              break;
             case "reffunc":
               out.push({ k: "reffunc", fn: node.func });
               break;
+            case "constop":
             case "op":
             case "call":
             case "call_indirect":
@@ -108,6 +116,7 @@ export function linearize(builder, cfg) {
           }
         } else {
           switch (node.kind) {
+            case "constop":
             case "op":
               out.push({
                 k: "op",
@@ -164,6 +173,11 @@ export function linearize(builder, cfg) {
     if (t.kind === "branch") emitTree(t.cond);
     else if (t.kind === "switch") emitTree(t.index);
     else if (t.kind === "return") for (const v of t.values) emitTree(v);
+    else if (t.kind === "returnCall") for (const v of t.args) emitTree(v);
+    else if (t.kind === "returnCallIndirect") {
+      for (const v of t.args) emitTree(v);
+      emitTree(t.index); // args, then index, on the stack
+    }
     code.set(block, out);
   }
   return code;

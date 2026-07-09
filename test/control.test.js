@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Module, s32, bool } from "../src/index.js";
+import { Module, s32, u32, s64, funcref, bool } from "../src/index.js";
 
 async function instantiate(mod, imports = {}) {
   const bytes = mod.emit();
@@ -276,5 +276,67 @@ test("unplaced label from a foreign body cannot be placed there either", () => {
   });
   mod.function([], []).body(($) => {
     assert.throws(() => escaped.here(), /not currently being built/);
+  });
+});
+
+test("tail calls: deep accumulator recursion reuses the frame", async () => {
+  const mod = new Module();
+  const sum = mod.function([s32, s32], [s32]);
+  sum.body((n, acc, $) => {
+    $.if(s32.eqz(n), ($) => $.return(acc));
+    $.returnCall(sum, s32.sub(n, s32.const(1)), s32.add(acc, n));
+  });
+  mod.function([s32], [s32]).export("sum").body((n, $) => {
+    $.returnCall(sum, n, s32.const(0));
+  });
+  const { exports } = await instantiate(mod);
+  // ten million frames would overflow any real stack without return_call
+  assert.equal(exports.sum(10_000_000), ((10_000_001 * 5_000_000) % 2 ** 32) | 0);
+  assert.equal(exports.sum(3), 6);
+});
+
+test("tail calls: mutual recursion (even/odd)", async () => {
+  const mod = new Module();
+  const even = mod.function([s32], [s32]);
+  const odd = mod.function([s32], [s32]);
+  even.body((n, $) => {
+    $.if(s32.eqz(n), ($) => $.return(s32.const(1)));
+    $.returnCall(odd, s32.sub(n, s32.const(1)));
+  });
+  odd.body((n, $) => {
+    $.if(s32.eqz(n), ($) => $.return(s32.const(0)));
+    $.returnCall(even, s32.sub(n, s32.const(1)));
+  });
+  mod.function([s32], [s32]).export("even").body((n, $) => $.returnCall(even, n));
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.even(1_000_000), 1);
+  assert.equal(exports.even(1_000_001), 0);
+});
+
+test("tail calls: indirect through a table", async () => {
+  const mod = new Module();
+  const sig = mod.funcType([s32], [s32]);
+  const dbl = mod.function([s32], [s32]).body((x, $) => $.return(s32.mul(x, s32.const(2))));
+  const neg = mod.function([s32], [s32]).body((x, $) => $.return(s32.sub(s32.const(0), x)));
+  const tbl = mod.table(funcref, { min: 2 });
+  mod.elem([dbl, neg]).at(tbl, 0);
+  mod.function([s32, s32], [s32]).export("dispatch").body((i, x, $) => {
+    $.returnCall(tbl, sig, u32.cast(i), x);
+  });
+  const { exports } = await instantiate(mod);
+  assert.equal(exports.dispatch(0, 21), 42);
+  assert.equal(exports.dispatch(1, 21), -21);
+});
+
+test("tail calls: eager errors for mismatched results, args, and handles", () => {
+  const mod = new Module();
+  const wrongResults = mod.function([], [s64]).body(($) => $.return(s64.const(0n)));
+  const callee = mod.function([s32], [s32]).body((x, $) => $.return(x));
+  mod.function([s32], [s32]).body((x, $) => {
+    assert.throws(() => $.returnCall(wrongResults), /must exactly match this function's results/);
+    assert.throws(() => $.returnCall(callee), /expects 1 argument/);
+    assert.throws(() => $.returnCall(callee, s64.const(1n)), /expected s32, got s64/);
+    assert.throws(() => $.returnCall({}), /expected a function handle/);
+    $.return(x);
   });
 });
