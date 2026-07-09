@@ -25,9 +25,11 @@ const { instance } = await WebAssembly.instantiate(mod.emit());
 if (instance.exports.f(7) !== 34) throw new Error("unexpected");
 ```
 
-`Struct.new(...)` takes values in field order; `.get`/`.set` go by name
-(eagerly validated; writes to `imm` fields are eager errors). Packed fields
-read via `.getS`/`.getU` — [signedness discipline](types.md), lane-style.
+`Struct.new(...)` takes values in field order, and `Struct.newDefault()`
+zero/null-initializes every field (an eager error if any field — a non-null
+reference, say — has no default). `.get`/`.set` go by name (eagerly
+validated; writes to `imm` fields are eager errors). Packed fields read via
+`.getS`/`.getU` — [signedness discipline](types.md), lane-style.
 
 ## Arrays
 

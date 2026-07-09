@@ -10,8 +10,9 @@ import { describeNode } from "../node.js";
  *   { k: 'const', type, value }
  *   { k: 'get'|'set', v: VLocal }
  *   { k: 'gget'|'gset', g: Variable(module) }
- *   { k: 'op', entry, memarg? }
- *   { k: 'call', fn }
+ *   { k: 'op', entry, memarg?, mem?, gcType?, lane?, … }
+ *   { k: 'call', fn } | { k: 'call_indirect', type, table } | { k: 'call_ref', type }
+ *   { k: 'reffunc', fn }
  *   { k: 'drop' }
  */
 /**

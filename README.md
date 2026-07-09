@@ -44,7 +44,8 @@ that creates them.
 
 The full **WebAssembly 2.0** surface — numerics, multi-value, bulk memory,
 reference types and tables, sign-extension, nontrapping conversions, and
-fixed-width **SIMD** — plus, from **wasm 3.0** (Node ≥ 22 to run):
+fixed-width **SIMD** — plus, from **wasm 3.0** and the threads proposal
+(engine floors per feature in the [manual's matrix](docs/index.md#feature-and-engine-matrix)):
 
 - **Multiple memories** — declare any number; every load/store already takes
   its memory handle, and `mem.copy(dst, src, len, { from })` copies across.
@@ -107,13 +108,14 @@ throw at build time.
 ## Development
 
 ```sh
-npm test        # 200+ tests: behavioral round-trips through V8, two
-                # differential fuzzers, per-instruction sweeps (~25k cases)
+npm test        # 270+ tests: behavioral round-trips through V8, three
+                # differential fuzzers, per-instruction sweeps (~25k cases),
+                # every manual example executed
 npm run types   # regenerate index.d.ts from the veneer registry
 ```
 
 Emitting runs on Node ≥ 18; the test suite exercises wasm 3.0 features and
-needs Node ≥ 22. `emit()` is repeatable and byte-stable; `debug: true`
+needs Node ≥ 22 (exception tests self-skip below Node 24). `emit()` is repeatable and byte-stable; `debug: true`
 captures creation stack traces for emit-time errors at zero steady-state
 cost.
 

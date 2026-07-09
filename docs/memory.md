@@ -84,3 +84,5 @@ The data-count section is emitted automatically whenever segments exist.
   cross-memory copy, index encoding.
 - [SIMD memory operations](simd.md#memory) — `v128` loads/stores, lane and
   splat/zero-extending forms.
+- [Threads and atomics](threads.md) — shared memories, the `atomic_` access
+  family, and the `mem.wait32`/`wait64`/`notify` futexes on this handle.

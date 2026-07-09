@@ -425,7 +425,7 @@ function elideFreshZeroInits(tree, slotOf) {
   let seq = tree;
   while (seq[0]?.op === "block") seq = seq[0].body;
   const written = new Set();
-  const LINEAR = new Set(["const", "get", "set", "gget", "gset", "op", "call", "call_indirect", "reffunc", "drop"]);
+  const LINEAR = new Set(["const", "get", "set", "gget", "gset", "op", "call", "call_indirect", "call_ref", "reffunc", "drop"]);
   for (let i = 0; i < seq.length; i++) {
     const item = seq[i];
     if (!LINEAR.has(item.op ?? item.k)) break;

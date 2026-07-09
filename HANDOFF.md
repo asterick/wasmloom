@@ -47,9 +47,11 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
 ```
 
 - `src/types.js` — `ValType`s. Public types (`s32`/`u32`/`s64`/`u64`/`f32`/
-  `f64`/`bool`/`funcref`/`externref`, plus ten SIMD lane views
-  `s8x16`…`f64x2` and four mask types `m8x16`…`m64x2` over `v128`) carry a
-  `wasmType` storage pointer; the pipeline only ever looks at storage.
+  `f64`/`bool`, refs `funcref`/`externref`/`exnref` + abstract GC
+  `anyref`/`eqref`/`i31ref`/`structref`/`arrayref`, ten SIMD lane views and
+  four masks over `v128`, packed `i8`/`i16` field tokens, `imm()`) carry a
+  `wasmType` storage pointer; typed/GC refs carry `heapType` handles; the
+  pipeline only ever looks at storage.
 - `src/optable.js` — the single data-driven instruction table, spec-shaped
   (`i32.div_s`). Adding an instruction here is one line; encoding and
   constructors follow.
@@ -62,8 +64,9 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
   expression nodes, variable handles, blocks/labels, the `$` statement
   context (labels, goto/gotoIf/switch, if/elseIf/else + while sugar).
 - `src/module.js` — `Module` and every handle: functions (body/import/
-  export/call/ref), variables, memory, tables, funcTypes, data/elem
-  segments, start.
+  export/call/ref/type), variables, memories (incl. shared + wait/notify),
+  tables, funcTypes (interned; carry .ref/.refNull), tags, GC structs/
+  arrays (named fields, extends), data/elem segments, start.
 
 ## Semantics that must not drift (all pinned by tests)
 
@@ -84,6 +87,11 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
   `cast` (free retype, any view → any view) is the only bridge. v128 can't
   cross the JS boundary, so its sweep runs through linear memory
   (`test/simd-sweep.test.js`).
+- **EH islands**: gotos/labels never cross a try/handler boundary (eager);
+  tail conversion is SUPPRESSED under protection; handler payloads pop into
+  vlocals at handler entry. **GC identity**: all GC types share one rec
+  group — same-shaped declarations must stay nominally distinct. **Atomics**:
+  natural alignment only (align option rejected).
 - **Invariants**: `emit()` is repeatable and byte-stable (compiled bodies
   are cached on the handle); `debug: true` output is byte-identical;
   zero-result ops auto-anchor as statements; unconsumed call results are

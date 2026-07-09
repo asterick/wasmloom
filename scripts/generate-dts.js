@@ -195,9 +195,9 @@ export function generateDts() {
   push("  body(cb: (...args: [...VarsOf<P>, Ctx<R>]) => void): this;");
   push("  import(module: string, name: string): this;");
   push("  export(name: string): this;");
-  push("  /** Precise non-null reference (ref $sig); upcasts are promotions. */");
   push("  /** Debug name for the name section (overrides export/import-derived). */");
   push("  name(name: string): this;");
+  push("  /** Precise non-null reference (ref $sig); upcasts are promotions. */");
   push("  ref(): Expr<RefBrand<P, R, false>>;");
   push("  /** This function's signature as an interned funcType handle. */");
   push("  readonly type: FuncType<P, R>;");

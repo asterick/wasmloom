@@ -1168,8 +1168,6 @@ export function attachGCRefs(handle, label) {
   };
 }
 
-const fieldValueType = (f) => (f.storage.packed ? null : f.storage);
-
 /** Operand for a field/element: packed storage takes any 32-bit integer. */
 function resolveStorage(x, storage, what) {
   return storage.packed ? resolveInt32(x, what) : resolveOperand(x, storage, what);

@@ -4,7 +4,7 @@ wasmloom weaves WebAssembly binaries from JavaScript expression builders —
 `mod.emit()` returns a `Uint8Array` ready for `WebAssembly.instantiate`, with
 no external toolchain and zero dependencies. Every builder call is
 type-checked eagerly at the call site, and the emitted bytes are verified
-against V8 by 200+ tests including differential fuzzers and ~25k-case
+against V8 by 270+ tests including three differential fuzzers and ~25k-case
 per-instruction sweeps.
 
 ```js

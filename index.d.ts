@@ -136,9 +136,9 @@ export interface Func<P extends readonly WasmType[] = WasmType[], R extends read
   body(cb: (...args: [...VarsOf<P>, Ctx<R>]) => void): this;
   import(module: string, name: string): this;
   export(name: string): this;
-  /** Precise non-null reference (ref $sig); upcasts are promotions. */
   /** Debug name for the name section (overrides export/import-derived). */
   name(name: string): this;
+  /** Precise non-null reference (ref $sig); upcasts are promotions. */
   ref(): Expr<RefBrand<P, R, false>>;
   /** This function's signature as an interned funcType handle. */
   readonly type: FuncType<P, R>;

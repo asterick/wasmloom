@@ -12,6 +12,9 @@ let nextBlockId = 1;
  *   { kind: 'branch', cond, ifTrue, ifFalse }
  *   { kind: 'switch', index, targets, defaultTarget }
  *   { kind: 'return', values }
+ *   { kind: 'returnCall' | 'returnCallRef' | 'returnCallIndirect', … } (tail rewrites)
+ *   { kind: 'throw', tag, args } | { kind: 'throwRef', value }
+ *   { kind: 'try', region } — protected region (body/handlers as sub-CFGs)
  *   { kind: 'unreachable' }
  */
 export class Block {

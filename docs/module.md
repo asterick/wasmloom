@@ -110,6 +110,10 @@ entity is used internally.
   [Multiple memories](multi-memory.md).
 - **Tables and element segments** — [Tables and references](tables.md).
 - **Data segments** — [Memory](memory.md#data-segments).
+- **Exception tags** — `mod.tag([types])`; see
+  [Exception handling](exceptions.md#tags).
+- **GC struct/array types** — `mod.struct(...)` / `mod.array(...)`; see
+  [Garbage collection](gc.md).
 - **Start function** — `mod.start(fn)` designates a `[] -> []` function to run
   at instantiation.
 
