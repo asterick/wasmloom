@@ -237,7 +237,49 @@ export function encodeModule(module) {
     });
   });
 
+  // The name section is a custom section and must follow the data section.
+  if (module.names) {
+    writeNameSection(w, module, {
+      fns: [...importedFns, ...definedFns],
+      tables: [...importedTables, ...definedTables],
+      mems: [...importedMems, ...definedMems],
+      globals: [...importedGlobals, ...definedGlobals],
+      elems: elemSegments,
+    });
+  }
+
   return w.toBytes();
+}
+
+/**
+ * The debug name an entity carries into the name section: an explicit
+ * .name() wins, then the export name, then "module.name" for imports.
+ */
+function debugNameOf(h) {
+  return h.nameStr ?? h.exportName ?? (h.importInfo ? `${h.importInfo.module}.${h.importInfo.name}` : null);
+}
+
+/**
+ * Custom "name" section (module 0, functions 1, tables 5, memories 6,
+ * globals 7, element segments 8, data segments 9). Local names (2) are
+ * deliberately absent: locals share wasm slots across disjoint live ranges,
+ * so one slot has no single name.
+ */
+function writeNameSection(w, module, { fns, tables, mems, globals, elems }) {
+  const spaces = [
+    [1, fns], [5, tables], [6, mems], [7, globals], [8, elems], [9, module.dataSegments],
+  ];
+  const anyNamed = module.moduleName || spaces.some(([, list]) => list.some((h) => debugNameOf(h) !== null));
+  if (!anyNamed) return;
+  w.section(0, (s) => {
+    s.name("name");
+    if (module.moduleName) s.section(0, (ss) => ss.name(module.moduleName));
+    for (const [id, list] of spaces) {
+      const entries = list.filter((h) => debugNameOf(h) !== null); // index order
+      if (entries.length === 0) continue;
+      s.section(id, (ss) => ss.vec(entries, (sw, h) => sw.u32(h.index).name(debugNameOf(h))));
+    }
+  });
 }
 
 /** Run the full pipeline for one defined function. */

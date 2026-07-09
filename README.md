@@ -81,6 +81,10 @@ dedicated mask types (`m8x16`…`m64x2`) that `bitselect` and `all_true` /
 `any_true` / `bitmask` require, and `cast` retypes any v128 view into any
 other for free.
 
+Emitted modules carry a **name section** by default — exports name their
+entities automatically, `.name("str")` overrides, `names: false` opts out —
+so stack traces read `at encrypt`, not `at wasm-function[13]`.
+
 The generated `index.d.ts` encodes all of it: parameter tuples infer the
 body callback's variable types, operand slots accept exactly the safe
 promotions, and shape/signedness barriers reject in TypeScript just as they

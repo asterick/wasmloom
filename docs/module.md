@@ -47,6 +47,15 @@ emitted module require a wasm 3.0 engine. Set `{ tailCalls: false }` to keep
 plain calls — full stack traces, no 3.0 requirement from this feature. The
 conversion rule lives in [Tail calls](tail-calls.md).
 
+### `names`
+
+Default **true**: the module emits a name section — every entity's debug
+name auto-derives from its export name (or `"module.name"` for imports),
+`.name("str")` chains override, and `mod.name("str")` names the module
+itself. Engines use these in stack traces and disassembly. Set
+`{ names: false }` to strip the section. See
+[Named stack traces](errors.md#named-stack-traces).
+
 ## Module variables (wasm globals)
 
 `mod.variable(type, init?)` declares a global. Mutable by default;

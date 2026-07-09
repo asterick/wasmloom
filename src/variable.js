@@ -70,6 +70,16 @@ export class Variable {
     return this;
   }
 
+  /** Debug name for the name section. Module variables only (locals share slots). */
+  name(s) {
+    if (this.scope !== "module") {
+      fail(".name(): locals share wasm slots and cannot carry names — only module variables take names");
+    }
+    if (typeof s !== "string" || s.length === 0) fail(".name(): expected a non-empty string");
+    this.nameStr = s;
+    return this;
+  }
+
   /** Module variables only: mark immutable. Eagerly rejects later .set(). */
   immutable() {
     if (this.scope !== "module") {
