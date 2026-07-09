@@ -8,6 +8,11 @@ import { encodeModule } from "./encode/encoder.js";
 import { MEMORY_OPS, TABLE_OPS, promoteConst, defaultInit, resolveInt32, forEachConstRef, attachTypedRefs } from "./expr.js";
 import { funcref, externref, isRef, isVec, typeKey } from "./types.js";
 
+function checkDebugName(s) {
+  if (typeof s !== "string" || s.length === 0) fail(".name(): expected a non-empty string");
+  return s;
+}
+
 /** Handle for a declared function. Declare first; attach `.body()` or `.import()` later. */
 export class FunctionHandle {
   constructor(module, params, results) {
@@ -68,6 +73,12 @@ export class FunctionHandle {
   export(name) {
     this.module._addExport(name, this, "func");
     this.exportName ??= name;
+    return this;
+  }
+
+  /** Debug name for the name section (overrides the export/import-derived one). */
+  name(s) {
+    this.nameStr = checkDebugName(s);
     return this;
   }
 
@@ -162,6 +173,12 @@ export class MemoryHandle {
   export(name) {
     this.module._addExport(name, this, "memory");
     this.exportName ??= name;
+    return this;
+  }
+
+  /** Debug name for the name section (overrides the export/import-derived one). */
+  name(s) {
+    this.nameStr = checkDebugName(s);
     return this;
   }
 }
@@ -304,6 +321,12 @@ export class TableHandle {
     this.exportName ??= name;
     return this;
   }
+
+  /** Debug name for the name section (overrides the export/import-derived one). */
+  name(s) {
+    this.nameStr = checkDebugName(s);
+    return this;
+  }
 }
 
 /**
@@ -345,6 +368,12 @@ export class ElemSegment {
   drop() {
     TABLE_OPS.dropElem(this);
   }
+
+  /** Debug name for the name section. */
+  name(s) {
+    this.nameStr = checkDebugName(s);
+    return this;
+  }
 }
 
 /**
@@ -373,6 +402,12 @@ export class DataSegment {
   /** data.drop — release the segment's contents at runtime. Statement. */
   drop() {
     MEMORY_OPS.dropData(this);
+  }
+
+  /** Debug name for the name section. */
+  name(s) {
+    this.nameStr = checkDebugName(s);
+    return this;
   }
 }
 
@@ -420,7 +455,7 @@ export class Module {
    * namespace type when they fit exactly (s32→s64, u32→s64/u64, f32→f64,
    * s32/u32→f64, bool→anything numeric). Lossy or narrowing moves are errors.
    *
-   * @param {{debug?: boolean, permissive?: boolean, tailCalls?: boolean}} [opts]
+   * @param {{debug?: boolean, permissive?: boolean, tailCalls?: boolean, names?: boolean}} [opts]
    *  - debug: capture creation stack traces for emit-time errors
    *  - permissive: bit-level leniency within a storage width — conditions
    *    accept integers (non-zero is true), integer positions accept the
@@ -428,11 +463,16 @@ export class Module {
    *  - tailCalls: default true — $.return of a call emits return_call.
    *    Set false to keep plain calls (full stack traces; no wasm 3.0
    *    engine requirement from this feature)
+   *  - names: default true — emit a name section: entities auto-derive
+   *    debug names from their export (or "module.name" import) and
+   *    .name("str") overrides. Set false to strip names entirely
    */
   constructor(opts = {}) {
     this.debug = opts.debug ?? false;
     this.permissive = opts.permissive ?? false;
     this.tailCalls = opts.tailCalls ?? true;
+    this.names = opts.names ?? true;
+    this.moduleName = null;
     this.functions = [];
     this.variables = [];
     this.memories = [];
@@ -568,6 +608,13 @@ export class Module {
     }
     if (this.startFunction) fail("mod.start: a start function is already set");
     this.startFunction = fn;
+    return this;
+  }
+
+  /** Module debug name for the name section. */
+  name(s) {
+    if (typeof s !== "string" || s.length === 0) fail("mod.name(): expected a non-empty string");
+    this.moduleName = s;
     return this;
   }
 

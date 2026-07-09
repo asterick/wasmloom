@@ -140,6 +140,8 @@ export function generateDts() {
   push("  import(module: string, name: string): this;");
   push("  export(name: string): this;");
   push("  immutable(): this;");
+  push("  /** Debug name for the name section (overrides export/import-derived). */");
+  push("  name(name: string): this;");
   push("}");
   push("");
   push("export interface Label {");
@@ -172,6 +174,8 @@ export function generateDts() {
   push("  import(module: string, name: string): this;");
   push("  export(name: string): this;");
   push("  /** Precise non-null reference (ref $sig); upcasts are promotions. */");
+  push("  /** Debug name for the name section (overrides export/import-derived). */");
+  push("  name(name: string): this;");
   push("  ref(): Expr<RefBrand<P, R, false>>;");
   push("  /** This function's signature as an interned funcType handle. */");
   push("  readonly type: FuncType<P, R>;");
@@ -209,6 +213,8 @@ export function generateDts() {
   push("  init(seg: DataSegment, dst: I32ish, src: I32ish, len: I32ish): void;");
   push("  import(module: string, name: string): this;");
   push("  export(name: string): this;");
+  push("  /** Debug name for the name section (overrides export/import-derived). */");
+  push("  name(name: string): this;");
   push("}");
   push("");
   push("export interface Table<E extends TypeTag = \"funcref\"> {");
@@ -223,6 +229,8 @@ export function generateDts() {
   push("    type: FuncType<P, R>, index: I32ish, ...args: IntoArgs<P>): CallResult<R>;");
   push("  import(module: string, name: string): this;");
   push("  export(name: string): this;");
+  push("  /** Debug name for the name section (overrides export/import-derived). */");
+  push("  name(name: string): this;");
   push("}");
   push("");
   push("type ConstOffset = number | Expr<\"s32\" | \"u32\"> | Global<\"s32\" | \"u32\">;");
@@ -230,18 +238,22 @@ export function generateDts() {
   push("export interface DataSegment {");
   push("  at(mem: Memory, offset: ConstOffset): this;");
   push("  drop(): void;");
+  push("  /** Debug name for the name section (overrides export/import-derived). */");
+  push("  name(name: string): this;");
   push("}");
   push("");
   push("export interface ElemSegment {");
   push("  at(table: Table<any>, offset: ConstOffset): this;");
   push("  drop(): void;");
+  push("  /** Debug name for the name section (overrides export/import-derived). */");
+  push("  name(name: string): this;");
   push("}");
   push("");
   push("type GlobalInit<T extends TypeTag> =");
   push("  Into<T> | Global<T> | null | number | bigint | boolean | readonly (number | bigint)[];");
   push("");
   push("export class Module {");
-  push("  constructor(opts?: { debug?: boolean; permissive?: boolean; tailCalls?: boolean });");
+  push("  constructor(opts?: { debug?: boolean; permissive?: boolean; tailCalls?: boolean; names?: boolean });");
   push("  function<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): Func<P, R>;");
   push("  function<P extends readonly WasmType[], R extends readonly WasmType[]>(type: FuncType<P, R>): Func<P, R>;");
   push("  funcType<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): FuncType<P, R>;");
@@ -252,6 +264,8 @@ export function generateDts() {
   push("  data(bytes: Uint8Array | ArrayBuffer): DataSegment;");
   push("  elem(items: readonly (Func<any, any> | null)[]): ElemSegment;");
   push("  start(fn: Func<any, any>): this;");
+  push("  /** Module debug name for the name section. */");
+  push("  name(name: string): this;");
   push("  emit(): Uint8Array;");
   push("}");
   push("");

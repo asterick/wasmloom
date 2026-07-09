@@ -81,6 +81,8 @@ export interface Global<T extends TypeTag = TypeTag> extends Expr<T> {
   import(module: string, name: string): this;
   export(name: string): this;
   immutable(): this;
+  /** Debug name for the name section (overrides export/import-derived). */
+  name(name: string): this;
 }
 
 export interface Label {
@@ -113,6 +115,8 @@ export interface Func<P extends readonly WasmType[] = WasmType[], R extends read
   import(module: string, name: string): this;
   export(name: string): this;
   /** Precise non-null reference (ref $sig); upcasts are promotions. */
+  /** Debug name for the name section (overrides export/import-derived). */
+  name(name: string): this;
   ref(): Expr<RefBrand<P, R, false>>;
   /** This function's signature as an interned funcType handle. */
   readonly type: FuncType<P, R>;
@@ -150,6 +154,8 @@ export interface Memory {
   init(seg: DataSegment, dst: I32ish, src: I32ish, len: I32ish): void;
   import(module: string, name: string): this;
   export(name: string): this;
+  /** Debug name for the name section (overrides export/import-derived). */
+  name(name: string): this;
 }
 
 export interface Table<E extends TypeTag = "funcref"> {
@@ -164,6 +170,8 @@ export interface Table<E extends TypeTag = "funcref"> {
     type: FuncType<P, R>, index: I32ish, ...args: IntoArgs<P>): CallResult<R>;
   import(module: string, name: string): this;
   export(name: string): this;
+  /** Debug name for the name section (overrides export/import-derived). */
+  name(name: string): this;
 }
 
 type ConstOffset = number | Expr<"s32" | "u32"> | Global<"s32" | "u32">;
@@ -171,18 +179,22 @@ type ConstOffset = number | Expr<"s32" | "u32"> | Global<"s32" | "u32">;
 export interface DataSegment {
   at(mem: Memory, offset: ConstOffset): this;
   drop(): void;
+  /** Debug name for the name section (overrides export/import-derived). */
+  name(name: string): this;
 }
 
 export interface ElemSegment {
   at(table: Table<any>, offset: ConstOffset): this;
   drop(): void;
+  /** Debug name for the name section (overrides export/import-derived). */
+  name(name: string): this;
 }
 
 type GlobalInit<T extends TypeTag> =
   Into<T> | Global<T> | null | number | bigint | boolean | readonly (number | bigint)[];
 
 export class Module {
-  constructor(opts?: { debug?: boolean; permissive?: boolean; tailCalls?: boolean });
+  constructor(opts?: { debug?: boolean; permissive?: boolean; tailCalls?: boolean; names?: boolean });
   function<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): Func<P, R>;
   function<P extends readonly WasmType[], R extends readonly WasmType[]>(type: FuncType<P, R>): Func<P, R>;
   funcType<const P extends readonly WasmType[], const R extends readonly WasmType[]>(params: P, results: R): FuncType<P, R>;
@@ -193,6 +205,8 @@ export class Module {
   data(bytes: Uint8Array | ArrayBuffer): DataSegment;
   elem(items: readonly (Func<any, any> | null)[]): ElemSegment;
   start(fn: Func<any, any>): this;
+  /** Module debug name for the name section. */
+  name(name: string): this;
   emit(): Uint8Array;
 }
 

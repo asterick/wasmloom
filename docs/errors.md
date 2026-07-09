@@ -51,6 +51,36 @@ every node/label creation and attaches it to emit-time failures. It's off by
 default (trace capture costs time during building, none at emit) and never
 changes the output bytes.
 
+## Named stack traces
+
+Engines read the emitted **name section** for wasm frames, and wasmloom
+fills it automatically: every function (and memory, table, module variable,
+segment, and the module itself) carries a debug name derived from its export
+name — or `"module.name"` for imports — with a chained `.name("str")`
+override for anything internal:
+
+```js
+import { Module } from "wasmloom";
+
+const mod = new Module().name("codec");
+const inner = mod.function([], []).name("tightLoop");
+inner.body(($) => $.unreachable());
+mod.function([], []).export("run").body(($) => {
+  inner.call();
+  $.return();
+});
+const { instance } = await WebAssembly.instantiate(mod.emit());
+let stack = "";
+try { instance.exports.run(); } catch (e) { stack = e.stack; }
+if (!/tightLoop/.test(stack)) throw new Error(stack); // named frame, not wasm-function[1]
+```
+
+[`new Module({ names: false })`](module.md#names) strips the section for
+size-sensitive builds. Local names are deliberately not emitted — locals
+share wasm slots across disjoint live ranges, so a slot has no single name.
+(One subtlety when reading traces: [tail calls](tail-calls.md) replace
+frames, so callers in tail position won't appear.)
+
 ## Runtime traps
 
 Traps are the engine's, not wasmloom's: division by zero, out-of-bounds

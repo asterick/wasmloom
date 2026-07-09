@@ -34,6 +34,7 @@ toolchain; emits binary `.wasm` bytes directly.
 | SIMD masks | Comparisons produce dedicated mask types (`m8x16`/`m16x8`/`m32x4`/`m64x2`) — the SIMD analog of `bool`. `bitselect` requires a shape-matched mask; `any_true`/`all_true` (→ `bool`) and `bitmask` (→ `u32`) live on masks. Masks are not data and not conditions |
 | SIMD v128 ops | Lane-agnostic instructions (bitwise, `bitselect`, plain load/store) appear on every integer lane namespace and mask — no bare `v128` type in the public API. Every v128 view retypes into any other via zero-cost `cast` (the universal bridge; there is no wasm instruction to select). Floats keep the scalar discipline: no bitwise ops without casting to an integer view |
 | Diagnostics | `new Module({ debug: true })` captures creation stack traces for emit-time errors |
+| Name section | Emitted by default: debug names auto-derive (export name, else "module.name" for imports); `.name("str")` chains on every module-level handle and `mod.name()` names the module; `names: false` strips. Locals deliberately unnamed (slot sharing). `debug` stays byte-neutral — names are independent of it |
 | Types | Plain JS with JSDoc annotations; `index.d.ts` is generated from the veneer registry (`npm run types` — tsc can't see the dynamically attached constructors), typed end-to-end: param tuples infer body-callback `Var`s, operand slots accept exactly the safe promotions, masks/shapes are barriers in TS too |
 | Testing | Round-trip: instantiate output with V8 (`node --test`), assert executed results |
 
@@ -388,8 +389,8 @@ may assume a shape for these beyond what's noted here.
 Deemed unnecessary for now; not queued, not planned. Reopen only if a
 concrete need appears.
 
-- **Custom sections** — name section emission (possibly tied to `debug`),
-  raw `mod.customSection(name, bytes)` passthrough, `.name()` attribute.
+- **Custom sections (raw)** — `mod.customSection(name, bytes)` passthrough.
+  (The name section itself shipped — see the decisions table.)
 
 ## Compilation pipeline
 
