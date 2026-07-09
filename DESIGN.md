@@ -387,13 +387,13 @@ may assume a shape for these beyond what's noted here.
 - Already out of spec scope (no design needed yet): memory64,
   relaxed SIMD.
 
-## Pinned — might revisit later
+## Dropped
 
-Deemed unnecessary for now; not queued, not planned. Reopen only if a
-concrete need appears.
+Considered and rejected — do not implement without a fresh decision.
 
 - **Custom sections (raw)** — `mod.customSection(name, bytes)` passthrough.
-  (The name section itself shipped — see the decisions table.)
+  Dropped 2026-07-08: not useful in practice; the name section (the one
+  custom section with real tooling value) shipped as a first-class feature.
 
 ## Compilation pipeline
 

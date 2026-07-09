@@ -143,14 +143,12 @@ builder callbacks ─► CFG of basic blocks (typed nodes, virtual locals)
   bytes, auto-derivation and overrides, stack-trace names), `docs-examples`
   (every manual example executes; cross-links checked).
 
-## Queue (in priority order)
+## Queue
 
-The active queue is empty — the wasm 2.0 surface, lowering, and polish are
-done. Remaining items are pinned:
-
-1. **Pinned (do not do unless asked)**: raw custom-section passthrough
-   (`mod.customSection(name, bytes)`) — see DESIGN.md's "Pinned" section.
-   (The name section itself shipped: auto-derived + `.name()` overrides.)
+Empty. Every ratified feature is shipped; raw custom sections were DROPPED
+(see DESIGN.md "Dropped") — don't resurrect without a fresh decision from
+Bryon. Remaining spec landscape if ever needed: memory64, relaxed SIMD.
+The next milestone is the 0.1.0 release (version, tag, CHANGELOG, publish).
 
 ## Working conventions
 
